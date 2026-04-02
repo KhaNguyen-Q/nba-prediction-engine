@@ -23,6 +23,9 @@ from scripts.team_utils import (
 
 RAW_DIR = "data/raw"
 ESPN_INJURY_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+NBA_STATS_HEALTH_URL = os.environ.get("NBA_STATS_HEALTH_URL", "https://stats.nba.com/stats/scoreboardv3")
+NBA_STATS_HEALTH_TIMEOUT = int(os.environ.get("NBA_STATS_HEALTH_TIMEOUT_SECONDS", "6"))
+NBA_STATS_REQUEST_TIMEOUT = int(os.environ.get("NBA_STATS_REQUEST_TIMEOUT_SECONDS", "20"))
 ODDS_API_SPORT = os.environ.get('ODDS_API_SPORT', 'basketball_nba')
 ODDS_API_BASE_URL = os.environ.get('ODDS_API_BASE_URL', 'https://api.the-odds-api.com/v4')
 ODDS_API_URL = os.environ.get(
@@ -43,6 +46,29 @@ PLAYER_LOG_RETRY_BACKOFF_SECONDS = float(os.environ.get('PLAYER_LOG_RETRY_BACKOF
 
 def ensure_data_dirs():
     os.makedirs(RAW_DIR, exist_ok=True)
+
+
+def _stats_api_is_reachable(timeout_seconds=NBA_STATS_HEALTH_TIMEOUT):
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.nba.com/"}
+    try:
+        resp = requests.get(NBA_STATS_HEALTH_URL, timeout=timeout_seconds, headers=headers)
+        return 200 <= resp.status_code < 500
+    except Exception:
+        return False
+
+
+def _fallback_existing_or_empty(save_path, columns, label):
+    if os.path.exists(save_path):
+        try:
+            cached = pd.read_csv(save_path)
+            print(f"Using cached {label} from {save_path} with {len(cached)} rows")
+            return cached
+        except Exception:
+            pass
+    empty = pd.DataFrame(columns=columns)
+    empty.to_csv(save_path, index=False)
+    print(f"Saved empty {label} to {save_path}")
+    return empty
 
 
 def _get_current_season(reference_date=None):
@@ -89,7 +115,22 @@ def _map_injury_severity(injury):
 
 def fetch_games_data(save_path=os.path.join(RAW_DIR, "games_raw.csv")):
     print("Fetching games from NBA API...")
-    games = leaguegamefinder.LeagueGameFinder().get_data_frames()[0]
+    if not _stats_api_is_reachable():
+        print("Warning: stats.nba.com unreachable; skipping games fetch.")
+        return _fallback_existing_or_empty(
+            save_path=save_path,
+            columns=['TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE'],
+            label='games data',
+        )
+    try:
+        games = leaguegamefinder.LeagueGameFinder(timeout=NBA_STATS_REQUEST_TIMEOUT).get_data_frames()[0]
+    except Exception as exc:
+        print(f"Warning: failed to fetch games from NBA API: {exc}")
+        return _fallback_existing_or_empty(
+            save_path=save_path,
+            columns=['TEAM_ID', 'TEAM_ABBREVIATION', 'GAME_ID', 'GAME_DATE'],
+            label='games data',
+        )
 
     # Filter to only the 30 NBA franchises (exclude overseas and affiliate teams)
     if 'TEAM_ID' in games.columns:
@@ -109,15 +150,27 @@ def fetch_players_data(save_path=os.path.join(RAW_DIR, "players_raw.csv")):
     season = _get_current_season()
     print(f"Fetching current NBA players for season {season}...")
 
+    if not _stats_api_is_reachable():
+        print("Warning: stats.nba.com unreachable; skipping player fetch.")
+        return _fallback_existing_or_empty(
+            save_path=save_path,
+            columns=['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'TEAM_ABBREVIATION', 'ROSTER_STATUS'],
+            label='players data',
+        )
     try:
         players_df = commonallplayers.CommonAllPlayers(
             season=season,
             league_id='00',
             is_only_current_season=1,
+            timeout=NBA_STATS_REQUEST_TIMEOUT,
         ).get_data_frames()[0]
     except Exception as exc:
         print(f"Warning: failed to fetch player data from NBA API: {exc}")
-        players_df = pd.DataFrame()
+        return _fallback_existing_or_empty(
+            save_path=save_path,
+            columns=['PLAYER_ID', 'PLAYER_NAME', 'TEAM_ID', 'TEAM_ABBREVIATION', 'ROSTER_STATUS'],
+            label='players data',
+        )
 
     if not players_df.empty:
         if 'TEAM_ID' in players_df.columns:
@@ -162,6 +215,18 @@ def fetch_player_game_logs_data(
     ensure_data_dirs()
     season = _get_current_season()
     logs_frames = []
+
+    if not _stats_api_is_reachable():
+        print("Warning: stats.nba.com unreachable; skipping player log fetch.")
+        return _fallback_existing_or_empty(
+            save_path=save_path,
+            columns=[
+                'PLAYER_ID', 'TEAM_ID', 'GAME_ID', 'GAME_DATE', 'MATCHUP',
+                'MIN', 'PTS', 'REB', 'AST', 'FG_PCT', 'FG3_PCT', 'FT_PCT',
+                'PLUS_MINUS', 'WL'
+            ],
+            label='player logs',
+        )
 
     if os.path.exists(players_path):
         players_df = pd.read_csv(players_path)
@@ -304,6 +369,27 @@ def fetch_injuries_data(save_path=os.path.join(RAW_DIR, "injuries_raw.csv"), tea
     except ValueError as err:
         print(f"Warning: invalid JSON from injuries source: {err}")
 
+    expected_columns = [
+        'TEAM_ID',
+        'TEAM_ABBREVIATION',
+        'TEAM_NAME',
+        'PLAYER_ID',
+        'PLAYER_NAME',
+        'GAME_DATE',
+        'INJURY_STATUS',
+        'INJURY_TYPE',
+        'INJURY_LOCATION',
+        'INJURY_DETAIL',
+        'INJURY_RETURN_DATE',
+        'INJURY_SEVERITY',
+        'FANTASY_STATUS',
+        'SHORT_COMMENT',
+        'LONG_COMMENT',
+        'DATA_SOURCE',
+        'FETCHED_AT_UTC',
+        'IS_UNAVAILABLE',
+        'AVAILABILITY_LABEL',
+    ]
     injuries = pd.DataFrame(rows)
     if not injuries.empty:
         injuries['GAME_DATE'] = pd.to_datetime(injuries['GAME_DATE'], errors='coerce')
@@ -333,6 +419,14 @@ def fetch_injuries_data(save_path=os.path.join(RAW_DIR, "injuries_raw.csv"), tea
                 np.where(injuries['INJURY_SEVERITY'] >= 0.5, 'Probable', 'Available')
             )
         )
+    if injuries.empty:
+        injuries = pd.DataFrame(columns=expected_columns)
+    else:
+        for col in expected_columns:
+            if col not in injuries.columns:
+                injuries[col] = pd.NA
+        injuries = injuries[expected_columns]
+
     injuries.to_csv(save_path, index=False)
     print(f"Saved injuries data to {save_path} with {len(injuries)} rows")
     return injuries

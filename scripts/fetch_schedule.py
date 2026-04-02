@@ -14,6 +14,7 @@ from scripts.team_utils import find_team_profile, is_nba_team_by_id
 
 RAW_PATH = "data/raw/upcoming_games.csv"
 ODDS_PATH = "data/raw/odds_raw.csv"
+SCOREBOARD_TIMEOUT_SECONDS = int(os.environ.get("SCOREBOARD_TIMEOUT_SECONDS", "12"))
 
 
 def _team_abbr(team_id, line_score_df):
@@ -65,6 +66,18 @@ def _fallback_from_odds(odds_path=ODDS_PATH):
 
 def fetch_upcoming_schedule(days_ahead=7, save_path=RAW_PATH):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    existing_non_empty = pd.DataFrame()
+    if os.path.exists(save_path):
+        try:
+            existing = pd.read_csv(save_path)
+            if not existing.empty and {"GAME_ID", "GAME_DATE", "HOME_TEAM_ID", "AWAY_TEAM_ID"}.issubset(existing.columns):
+                existing["GAME_DATE"] = pd.to_datetime(existing["GAME_DATE"], errors="coerce")
+                existing = existing.dropna(subset=["GAME_DATE"]).copy()
+                if not existing.empty:
+                    existing_non_empty = existing
+        except Exception:
+            existing_non_empty = pd.DataFrame()
+
     start_date = datetime.now(timezone.utc).date()
     rows = []
 
@@ -76,7 +89,7 @@ def fetch_upcoming_schedule(days_ahead=7, save_path=RAW_PATH):
                 game_date=date_str,
                 day_offset=0,
                 league_id='00',
-                timeout=30,
+                timeout=SCOREBOARD_TIMEOUT_SECONDS,
             )
             frames = endpoint.get_data_frames()
         except Exception as exc:
@@ -133,6 +146,15 @@ def fetch_upcoming_schedule(days_ahead=7, save_path=RAW_PATH):
             'HOME_TEAM_ABBR',
             'AWAY_TEAM_ABBR',
         ])
+
+    if schedule.empty and not existing_non_empty.empty:
+        existing_non_empty = existing_non_empty.sort_values(["GAME_DATE", "GAME_ID"])
+        existing_non_empty.to_csv(save_path, index=False)
+        print(
+            f"Schedule fetch returned 0 rows; retained previous non-empty schedule at {save_path} "
+            f"with {len(existing_non_empty)} games"
+        )
+        return existing_non_empty
 
     schedule.to_csv(save_path, index=False)
     print(f"Saved upcoming schedule to {save_path} with {len(schedule)} games")

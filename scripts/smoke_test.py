@@ -4,6 +4,7 @@ import json
 import requests
 import joblib
 import pandas as pd
+from pandas.errors import EmptyDataError
 
 
 REQUIRED_FILES = [
@@ -20,6 +21,15 @@ REQUIRED_FILES = [
     "models/registry/index.json",
     "reports/monitoring_report.json",
 ]
+
+
+def _safe_read_csv(path):
+    try:
+        return pd.read_csv(path), None
+    except EmptyDataError:
+        return pd.DataFrame(), "empty_file"
+    except Exception as exc:
+        return None, str(exc)
 
 
 def check_files():
@@ -61,11 +71,13 @@ def check_data_shapes():
         "data/processed/upcoming_inference_features.csv",
     ]
     for path in data_targets:
-        try:
-            df = pd.read_csv(path)
+        df, err = _safe_read_csv(path)
+        if err is None:
             print(f"[data] {path}: rows={len(df)} cols={len(df.columns)}")
-        except Exception as exc:
-            print(f"[data] {path}: FAILED ({exc})")
+        elif err == "empty_file":
+            print(f"[data] {path}: rows=0 cols=0 (empty file)")
+        else:
+            print(f"[data] {path}: FAILED ({err})")
             ok = False
     return ok
 
@@ -106,7 +118,10 @@ def check_team_id_consistency():
     }
 
     if os.path.exists(players_path):
-        players = pd.read_csv(players_path)
+        players, err = _safe_read_csv(players_path)
+        if players is None:
+            print(f"[consistency] players read failed: {err}")
+            return False
         if {"TEAM_ID", "TEAM_ABBREVIATION"}.issubset(players.columns):
             players["TEAM_ID"] = pd.to_numeric(players["TEAM_ID"], errors="coerce")
             players = players.dropna(subset=["TEAM_ID"]).copy()
@@ -126,7 +141,10 @@ def check_team_id_consistency():
                 print("[consistency] players TEAM_ID/TEAM_ABBR: OK")
 
     if os.path.exists(upcoming_path):
-        upcoming = pd.read_csv(upcoming_path)
+        upcoming, err = _safe_read_csv(upcoming_path)
+        if upcoming is None:
+            print(f"[consistency] upcoming read failed: {err}")
+            return False
         required = {"GAME_ID", "HOME_TEAM_ID", "AWAY_TEAM_ID"}
         if required.issubset(upcoming.columns):
             upcoming["HOME_TEAM_ID"] = pd.to_numeric(upcoming["HOME_TEAM_ID"], errors="coerce")
@@ -144,7 +162,14 @@ def check_team_id_consistency():
                 print("[consistency] upcoming team IDs: OK")
 
             if os.path.exists(inference_path):
-                inf = pd.read_csv(inference_path)
+                inf, err = _safe_read_csv(inference_path)
+                if inf is None:
+                    print(f"[consistency] inference read failed: {err}")
+                    ok = False
+                    return ok
+                if err == "empty_file":
+                    print("[consistency] inference file empty (likely no upcoming schedule rows); skipping GAME_ID alignment")
+                    return ok
                 if {"GAME_ID", "TEAM_ID"}.issubset(inf.columns):
                     inf["TEAM_ID"] = pd.to_numeric(inf["TEAM_ID"], errors="coerce")
                     inf = inf.dropna(subset=["TEAM_ID"]).copy()

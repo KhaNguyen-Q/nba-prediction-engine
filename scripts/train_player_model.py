@@ -85,7 +85,11 @@ def merge_injury_severity(player_df, injuries_path=INJURIES_PATH):
         player_df['INJURY_SEVERITY'] = 0.0
         return player_df
 
-    injuries = pd.read_csv(injuries_path)
+    try:
+        injuries = pd.read_csv(injuries_path)
+    except Exception:
+        player_df['INJURY_SEVERITY'] = 0.0
+        return player_df
     if injuries.empty:
         player_df['INJURY_SEVERITY'] = 0.0
         return player_df

@@ -309,7 +309,10 @@ def load_injury_impact(df, path='data/raw/injuries_raw.csv'):
     if not os.path.exists(path):
         return pd.Series(0, index=df.index)
 
-    injuries = pd.read_csv(path)
+    try:
+        injuries = pd.read_csv(path)
+    except Exception:
+        return pd.Series(0.0, index=df.index)
     if injuries.empty:
         return pd.Series(0, index=df.index)
 

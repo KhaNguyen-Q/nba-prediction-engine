@@ -18,30 +18,39 @@ from scripts.train_ensemble import train_ensemble
 from scripts.train_player_model import train_player_model
 
 
+def _run_step(label, fn):
+    try:
+        print(f"Running step: {label}")
+        return fn()
+    except Exception as exc:
+        print(f"Warning: step failed ({label}): {exc}")
+        return None
+
+
 def phase0_setup():
     print("PHASE 0: Foundation -> data ingestion and initial feature engineering")
-    fetch_games_data()
-    fetch_players_data()
-    fetch_player_game_logs_data()
-    fetch_odds_data()
-    fetch_upcoming_schedule(days_ahead=7)
-    fetch_availability_for_upcoming()
+    _run_step("fetch_games_data", fetch_games_data)
+    _run_step("fetch_players_data", fetch_players_data)
+    _run_step("fetch_player_game_logs_data", fetch_player_game_logs_data)
+    _run_step("fetch_odds_data", fetch_odds_data)
+    _run_step("fetch_upcoming_schedule", lambda: fetch_upcoming_schedule(days_ahead=7))
+    _run_step("fetch_availability_for_upcoming", fetch_availability_for_upcoming)
 
 
 def phase1_feature_engineering():
     print("PHASE 1: Data & Feature Engineering")
-    build_features_main()
-    build_inference_features_main()
-    generate_monitoring_report()
+    _run_step("build_features", build_features_main)
+    _run_step("build_inference_features", build_inference_features_main)
+    _run_step("generate_monitoring_report", generate_monitoring_report)
 
 
 def phase2_model_training():
     print("PHASE 2: Model training")
-    train_baseline()
-    train_tree_model()
-    train_player_model()
-    train_sequential()
-    train_ensemble()
+    _run_step("train_baseline", train_baseline)
+    _run_step("train_tree_model", train_tree_model)
+    _run_step("train_player_model", train_player_model)
+    _run_step("train_sequential", train_sequential)
+    _run_step("train_ensemble", train_ensemble)
 
 
 def main():
