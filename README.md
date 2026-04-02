@@ -558,5 +558,5 @@ This README is the living architectural document for the repository. Whenever ne
 
 ---
 
-_Last updated by the agent on March 31, 2026 (Phase 4 in progress)._
+_Last updated on March 31, 2026 (Phase 4 in progress)._
 >>>>>>> 7f294d3 (Phase 3.5 optimization + README update)
