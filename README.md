@@ -1,7 +1,6 @@
-<<<<<<< HEAD
+
 # nba-prediction-engine
 =======
-# NBA Prediction Project
 
 ## Project Overview
 
