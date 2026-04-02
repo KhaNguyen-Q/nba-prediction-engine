@@ -1,0 +1,182 @@
+[
+  {
+    "team_id": 1610612737,
+    "abbreviation": "ATL",
+    "name": "Atlanta Hawks",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612738,
+    "abbreviation": "BOS",
+    "name": "Boston Celtics",
+    "adult_quality_rating": 7
+  },
+  {
+    "team_id": 1610612751,
+    "abbreviation": "BKN",
+    "name": "Brooklyn Nets",
+    "adult_quality_rating": 8
+  },
+  {
+    "team_id": 1610612766,
+    "abbreviation": "CHA",
+    "name": "Charlotte Hornets",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612741,
+    "abbreviation": "CHI",
+    "name": "Chicago Bulls",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612739,
+    "abbreviation": "CLE",
+    "name": "Cleveland Cavaliers",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612742,
+    "abbreviation": "DAL",
+    "name": "Dallas Mavericks",
+    "adult_quality_rating": 4
+  },
+  {
+    "team_id": 1610612743,
+    "abbreviation": "DEN",
+    "name": "Denver Nuggets",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612765,
+    "abbreviation": "DET",
+    "name": "Detroit Pistons",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612744,
+    "abbreviation": "GSW",
+    "name": "Golden State Warriors",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612745,
+    "abbreviation": "HOU",
+    "name": "Houston Rockets",
+    "adult_quality_rating": 6
+  },
+  {
+    "team_id": 1610612754,
+    "abbreviation": "IND",
+    "name": "Indiana Pacers",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612746,
+    "abbreviation": "LAC",
+    "name": "Los Angeles Clippers",
+    "adult_quality_rating": 7
+  },
+  {
+    "team_id": 1610612747,
+    "abbreviation": "LAL",
+    "name": "Los Angeles Lakers",
+    "adult_quality_rating": 8
+  },
+  {
+    "team_id": 1610612763,
+    "abbreviation": "MEM",
+    "name": "Memphis Grizzlies",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612748,
+    "abbreviation": "MIA",
+    "name": "Miami Heat",
+    "adult_quality_rating": 9
+  },
+  {
+    "team_id": 1610612749,
+    "abbreviation": "MIL",
+    "name": "Milwaukee Bucks",
+    "adult_quality_rating": 6
+  },
+  {
+    "team_id": 1610612750,
+    "abbreviation": "MIN",
+    "name": "Minnesota Timberwolves",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612740,
+    "abbreviation": "NOP",
+    "name": "New Orleans Pelicans",
+    "adult_quality_rating": 4
+  },
+  {
+    "team_id": 1610612752,
+    "abbreviation": "NYK",
+    "name": "New York Knicks",
+    "adult_quality_rating": 8
+  },
+  {
+    "team_id": 1610612760,
+    "abbreviation": "OKC",
+    "name": "Oklahoma City Thunder",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612753,
+    "abbreviation": "ORL",
+    "name": "Orlando Magic",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612755,
+    "abbreviation": "PHI",
+    "name": "Philadelphia 76ers",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612756,
+    "abbreviation": "PHX",
+    "name": "Phoenix Suns",
+    "adult_quality_rating": 4
+  },
+  {
+    "team_id": 1610612757,
+    "abbreviation": "POR",
+    "name": "Portland Trail Blazers",
+    "adult_quality_rating": 6
+  },
+  {
+    "team_id": 1610612758,
+    "abbreviation": "SAC",
+    "name": "Sacramento Kings",
+    "adult_quality_rating": 6
+  },
+  {
+    "team_id": 1610612759,
+    "abbreviation": "SAS",
+    "name": "San Antonio Spurs",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612761,
+    "abbreviation": "TOR",
+    "name": "Toronto Raptors",
+    "adult_quality_rating": 6
+  },
+  {
+    "team_id": 1610612762,
+    "abbreviation": "UTA",
+    "name": "Utah Jazz",
+    "adult_quality_rating": 5
+  },
+  {
+    "team_id": 1610612764,
+    "abbreviation": "WAS",
+    "name": "Washington Wizards",
+    "adult_quality_rating": 5
+  }
+]

@@ -1,0 +1,16 @@
+pandas>=2.0
+numpy>=1.25
+scikit-learn>=1.3
+joblib>=1.3
+xgboost>=1.8
+lightgbm>=3.4
+torch>=2.0
+fastapi>=0.111
+streamlit>=1.38
+uvicorn>=0.23
+psycopg2-binary>=2.9
+nba-api>=1.1.10
+python-dotenv>=1.0
+requests>=2.31
+beautifulsoup4>=4.12
+apscheduler>=3.10

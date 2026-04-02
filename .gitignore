@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Runtime logs
+logs/
+*.log
+
+# Large generated artifacts
+data/raw/
+data/processed/
+models/
+reports/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

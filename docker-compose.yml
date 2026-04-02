@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: nba_prediction_api
+    ports:
+      - "8000:8000"
+    environment:
+      - PIPELINE_MODE=once
+    volumes:
+      - ./:/app
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    container_name: nba_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nba
+      POSTGRES_USER: nba
+      POSTGRES_PASSWORD: nba
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

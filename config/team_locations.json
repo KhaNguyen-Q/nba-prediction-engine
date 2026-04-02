@@ -1,0 +1,272 @@
+[
+  {
+    "team_id": 1610612737,
+    "abbreviation": "ATL",
+    "city": "Atlanta",
+    "state": "GA",
+    "lat": 33.755,
+    "lon": -84.39,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612738,
+    "abbreviation": "BOS",
+    "city": "Boston",
+    "state": "MA",
+    "lat": 42.366,
+    "lon": -71.061,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612751,
+    "abbreviation": "BKN",
+    "city": "Brooklyn",
+    "state": "NY",
+    "lat": 40.682,
+    "lon": -73.975,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612766,
+    "abbreviation": "CHA",
+    "city": "Charlotte",
+    "state": "NC",
+    "lat": 35.225,
+    "lon": -80.839,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612741,
+    "abbreviation": "CHI",
+    "city": "Chicago",
+    "state": "IL",
+    "lat": 41.88,
+    "lon": -87.674,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612739,
+    "abbreviation": "CLE",
+    "city": "Cleveland",
+    "state": "OH",
+    "lat": 41.496,
+    "lon": -81.687,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612742,
+    "abbreviation": "DAL",
+    "city": "Dallas",
+    "state": "TX",
+    "lat": 32.79,
+    "lon": -96.81,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612743,
+    "abbreviation": "DEN",
+    "city": "Denver",
+    "state": "CO",
+    "lat": 39.748,
+    "lon": -104.991,
+    "timezone": "America/Denver"
+  },
+  {
+    "team_id": 1610612765,
+    "abbreviation": "DET",
+    "city": "Detroit",
+    "state": "MI",
+    "lat": 42.341,
+    "lon": -83.055,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612744,
+    "abbreviation": "GSW",
+    "city": "San Francisco",
+    "state": "CA",
+    "lat": 37.768,
+    "lon": -122.387,
+    "timezone": "America/Los_Angeles"
+  },
+  {
+    "team_id": 1610612745,
+    "abbreviation": "HOU",
+    "city": "Houston",
+    "state": "TX",
+    "lat": 29.75,
+    "lon": -95.362,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612754,
+    "abbreviation": "IND",
+    "city": "Indianapolis",
+    "state": "IN",
+    "lat": 39.764,
+    "lon": -86.155,
+    "timezone": "America/Indiana/Indianapolis"
+  },
+  {
+    "team_id": 1610612746,
+    "abbreviation": "LAC",
+    "city": "Los Angeles",
+    "state": "CA",
+    "lat": 34.043,
+    "lon": -118.267,
+    "timezone": "America/Los_Angeles"
+  },
+  {
+    "team_id": 1610612747,
+    "abbreviation": "LAL",
+    "city": "Los Angeles",
+    "state": "CA",
+    "lat": 34.043,
+    "lon": -118.267,
+    "timezone": "America/Los_Angeles"
+  },
+  {
+    "team_id": 1610612763,
+    "abbreviation": "MEM",
+    "city": "Memphis",
+    "state": "TN",
+    "lat": 35.138,
+    "lon": -90.05,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612748,
+    "abbreviation": "MIA",
+    "city": "Miami",
+    "state": "FL",
+    "lat": 25.781,
+    "lon": -80.187,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612749,
+    "abbreviation": "MIL",
+    "city": "Milwaukee",
+    "state": "WI",
+    "lat": 43.045,
+    "lon": -87.917,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612750,
+    "abbreviation": "MIN",
+    "city": "Minneapolis",
+    "state": "MN",
+    "lat": 44.979,
+    "lon": -93.276,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612740,
+    "abbreviation": "NOP",
+    "city": "New Orleans",
+    "state": "LA",
+    "lat": 29.944,
+    "lon": -90.082,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612752,
+    "abbreviation": "NYK",
+    "city": "New York",
+    "state": "NY",
+    "lat": 40.75,
+    "lon": -73.993,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612760,
+    "abbreviation": "OKC",
+    "city": "Oklahoma City",
+    "state": "OK",
+    "lat": 35.463,
+    "lon": -97.515,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612753,
+    "abbreviation": "ORL",
+    "city": "Orlando",
+    "state": "FL",
+    "lat": 28.539,
+    "lon": -81.383,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612755,
+    "abbreviation": "PHI",
+    "city": "Philadelphia",
+    "state": "PA",
+    "lat": 39.901,
+    "lon": -75.172,
+    "timezone": "America/New_York"
+  },
+  {
+    "team_id": 1610612756,
+    "abbreviation": "PHX",
+    "city": "Phoenix",
+    "state": "AZ",
+    "lat": 33.445,
+    "lon": -112.071,
+    "timezone": "America/Phoenix"
+  },
+  {
+    "team_id": 1610612757,
+    "abbreviation": "POR",
+    "city": "Portland",
+    "state": "OR",
+    "lat": 45.531,
+    "lon": -122.666,
+    "timezone": "America/Los_Angeles"
+  },
+  {
+    "team_id": 1610612758,
+    "abbreviation": "SAC",
+    "city": "Sacramento",
+    "state": "CA",
+    "lat": 38.58,
+    "lon": -121.499,
+    "timezone": "America/Los_Angeles"
+  },
+  {
+    "team_id": 1610612759,
+    "abbreviation": "SAS",
+    "city": "San Antonio",
+    "state": "TX",
+    "lat": 29.426,
+    "lon": -98.437,
+    "timezone": "America/Chicago"
+  },
+  {
+    "team_id": 1610612761,
+    "abbreviation": "TOR",
+    "city": "Toronto",
+    "state": "ON",
+    "lat": 43.643,
+    "lon": -79.379,
+    "timezone": "America/Toronto"
+  },
+  {
+    "team_id": 1610612762,
+    "abbreviation": "UTA",
+    "city": "Salt Lake City",
+    "state": "UT",
+    "lat": 40.768,
+    "lon": -111.901,
+    "timezone": "America/Denver"
+  },
+  {
+    "team_id": 1610612764,
+    "abbreviation": "WAS",
+    "city": "Washington",
+    "state": "DC",
+    "lat": 38.898,
+    "lon": -77.02,
+    "timezone": "America/New_York"
+  }
+]
