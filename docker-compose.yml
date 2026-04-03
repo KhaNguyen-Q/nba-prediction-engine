@@ -8,10 +8,24 @@ services:
       - "8000:8000"
     environment:
       - PIPELINE_MODE=once
+      - STRICT_STARTUP_CHECKS=1
     volumes:
       - ./:/app
     depends_on:
       - postgres
+      - scheduler
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  scheduler:
+    build: .
+    container_name: nba_pipeline_scheduler
+    environment:
+      - PIPELINE_MODE=scheduler
+      - STRICT_STARTUP_CHECKS=0
+    volumes:
+      - ./:/app
+    command: ["python", "scripts/update_pipeline.py"]
+    restart: unless-stopped
 
   postgres:
     image: postgres:15

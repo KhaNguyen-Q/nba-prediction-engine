@@ -72,9 +72,17 @@ def projection_table(projection_block):
         "availability",
         "injury_status",
         "projected_minutes",
+        "projected_minutes_ci_low",
+        "projected_minutes_ci_high",
         "projected_points",
+        "projected_points_ci_low",
+        "projected_points_ci_high",
         "projected_rebounds",
+        "projected_rebounds_ci_low",
+        "projected_rebounds_ci_high",
         "projected_assists",
+        "projected_assists_ci_low",
+        "projected_assists_ci_high",
     ]
     existing = [col for col in preferred if col in df.columns]
     remaining = [col for col in df.columns if col not in existing]
@@ -176,6 +184,29 @@ def load_backtest_summary():
         return pd.DataFrame()
 
 
+def calibration_summary(df, model_label):
+    if df.empty or not {"predicted_mean", "observed_rate"}.issubset(df.columns):
+        return None
+    work = df.copy()
+    work["predicted_mean"] = pd.to_numeric(work["predicted_mean"], errors="coerce")
+    work["observed_rate"] = pd.to_numeric(work["observed_rate"], errors="coerce")
+    work = work.dropna(subset=["predicted_mean", "observed_rate"])
+    if work.empty:
+        return None
+    gap = (work["predicted_mean"] - work["observed_rate"]).abs()
+    signed_gap = (work["predicted_mean"] - work["observed_rate"]).mean()
+    mae = float(gap.mean())
+    max_gap = float(gap.max())
+    tendency = "over-confident" if signed_gap > 0.0 else ("under-confident" if signed_gap < 0.0 else "well-centered")
+    return {
+        "model": model_label,
+        "avg_gap": mae,
+        "max_gap": max_gap,
+        "signed_gap": float(signed_gap),
+        "tendency": tendency,
+    }
+
+
 st.title("NBA Prediction Dashboard")
 st.caption("Team win probabilities, player projections, and API health checks.")
 
@@ -249,6 +280,21 @@ with col_right:
             f"Tree features: {len(features_data.get('tree_features', []))}"
         )
 
+    st.subheader("Pipeline Status")
+    pipeline_data, pipeline_err = safe_get_json(f"{api_base}/pipeline-status")
+    if pipeline_err:
+        st.error(f"Could not load /pipeline-status: {pipeline_err}")
+    else:
+        if not pipeline_data.get("available", False):
+            st.warning(pipeline_data.get("detail", "Pipeline status unavailable"))
+        else:
+            st.write({
+                "run_id": pipeline_data.get("run_id"),
+                "status": pipeline_data.get("status"),
+                "started_at_utc": pipeline_data.get("started_at_utc"),
+                "completed_at_utc": pipeline_data.get("completed_at_utc"),
+            })
+
     st.subheader("Monitoring")
     monitoring_data, monitoring_err = safe_get_json(f"{api_base}/monitoring")
     if monitoring_err:
@@ -265,6 +311,11 @@ with col_right:
                 "avg_psi_pct": format_number_pct((drift.get("avg_psi") or 0.0) * 100.0, 2),
                 "max_psi_pct": format_number_pct((drift.get("max_psi") or 0.0) * 100.0, 2),
             })
+            alerts = monitoring_data.get("alerts", {})
+            if alerts:
+                st.write({"alert_status": alerts.get("overall_status"), "alert_count": len(alerts.get("items", []))})
+                if alerts.get("items"):
+                    st.dataframe(pd.DataFrame(alerts.get("items", [])), hide_index=True, use_container_width=True)
             with st.expander("Freshness Details", expanded=False):
                 st.json(freshness)
             feature_psi = drift.get("feature_psi", {})
@@ -381,6 +432,12 @@ with col_left:
                     f"Model confidence: {format_pct(winner_confidence, 1)} ({confidence_band}) on {favored_team}. "
                     f"Edge strength: {format_pct(edge_strength, 1)}."
                 )
+                if report.get("home_win_ci_low") is not None and report.get("home_win_ci_high") is not None:
+                    st.caption(
+                        f"Home win confidence interval: {100*float(report.get('home_win_ci_low')):.1f}% - "
+                        f"{100*float(report.get('home_win_ci_high')):.1f}% "
+                        f"(model spread std={float(report.get('model_spread_std', 0.0)):.3f})"
+                    )
 
                 if compare_models:
                     compare_payload_base = {
@@ -419,10 +476,26 @@ with col_left:
                 with st.expander("Feature Snapshot", expanded=False):
                     st.json(result.get("feature_snapshot", {}))
 
+                data_quality = result.get("data_quality", {})
+                if data_quality:
+                    alerts = (data_quality.get("alerts") or {}).get("items", [])
+                    overall_alert = (data_quality.get("alerts") or {}).get("overall_status", "pass")
+                    if overall_alert != "pass":
+                        st.warning(f"Data quality status: {overall_alert}")
+                    else:
+                        st.success("Data quality status: pass")
+                    if alerts:
+                        st.dataframe(pd.DataFrame(alerts), hide_index=True, use_container_width=True)
+
                 advisory = result.get("advisory", {})
                 if advisory:
                     st.subheader("AI Game Brief")
                     st.info(advisory.get("narrative", ""))
+                    drivers = advisory.get("confidence_drivers", [])
+                    if drivers:
+                        st.markdown("**Why confidence changed**")
+                        for d in drivers:
+                            st.caption(f"- {d.get('factor')}: {d.get('impact')} ({d.get('detail')})")
                     top_rec = advisory.get("top_recommendation")
                     if top_rec:
                         st.success(
@@ -509,6 +582,23 @@ with col_left:
                             st.info("No player projections available for home team.")
                         else:
                             st.dataframe(home_df, use_container_width=True, hide_index=True)
+                            if alt is not None and {"player_name", "projected_points", "projected_points_ci_low", "projected_points_ci_high"}.issubset(home_df.columns):
+                                chart_df = home_df.head(8).copy()
+                                err = (
+                                    alt.Chart(chart_df)
+                                    .mark_errorbar()
+                                    .encode(
+                                        y=alt.Y("player_name:N", sort="-x"),
+                                        x=alt.X("projected_points_ci_low:Q", title="Projected PTS"),
+                                        x2="projected_points_ci_high:Q",
+                                    )
+                                )
+                                pts = (
+                                    alt.Chart(chart_df)
+                                    .mark_point(color="#2e7d32", size=55)
+                                    .encode(y=alt.Y("player_name:N", sort="-x"), x="projected_points:Q")
+                                )
+                                st.altair_chart((err + pts).properties(height=260), use_container_width=True)
                             st.download_button(
                                 "Download Home Projections CSV",
                                 data=home_df.to_csv(index=False),
@@ -527,6 +617,23 @@ with col_left:
                             st.info("No player projections available for away team.")
                         else:
                             st.dataframe(away_df, use_container_width=True, hide_index=True)
+                            if alt is not None and {"player_name", "projected_points", "projected_points_ci_low", "projected_points_ci_high"}.issubset(away_df.columns):
+                                chart_df = away_df.head(8).copy()
+                                err = (
+                                    alt.Chart(chart_df)
+                                    .mark_errorbar()
+                                    .encode(
+                                        y=alt.Y("player_name:N", sort="-x"),
+                                        x=alt.X("projected_points_ci_low:Q", title="Projected PTS"),
+                                        x2="projected_points_ci_high:Q",
+                                    )
+                                )
+                                pts = (
+                                    alt.Chart(chart_df)
+                                    .mark_point(color="#2e7d32", size=55)
+                                    .encode(y=alt.Y("player_name:N", sort="-x"), x="projected_points:Q")
+                                )
+                                st.altair_chart((err + pts).properties(height=260), use_container_width=True)
                             st.download_button(
                                 "Download Away Projections CSV",
                                 data=away_df.to_csv(index=False),
@@ -544,11 +651,32 @@ st.subheader("Calibration & Backtest")
 cal_col1, cal_col2 = st.columns(2, gap="large")
 with cal_col1:
     st.markdown("**Calibration Curves**")
+    st.caption(
+        "How to read: if the model is perfectly calibrated, the observed line should closely match "
+        "the predicted line. Bigger gaps mean probability estimates are less trustworthy."
+    )
     cal_base = load_calibration_report("baseline")
     cal_tree = load_calibration_report("tree")
     if cal_base.empty and cal_tree.empty:
         st.info("Calibration reports not found. Run training scripts to generate reports/calibration_*.csv.")
     else:
+        summaries = []
+        base_summary = calibration_summary(cal_base, "Baseline")
+        tree_summary = calibration_summary(cal_tree, "Tree")
+        if base_summary:
+            summaries.append(base_summary)
+        if tree_summary:
+            summaries.append(tree_summary)
+        if summaries:
+            summary_df = pd.DataFrame(summaries)
+            summary_df["avg_gap_pct"] = summary_df["avg_gap"].map(lambda x: format_number_pct(float(x) * 100.0, 2))
+            summary_df["max_gap_pct"] = summary_df["max_gap"].map(lambda x: format_number_pct(float(x) * 100.0, 2))
+            summary_df["bias_pct"] = summary_df["signed_gap"].map(lambda x: format_number_pct(float(x) * 100.0, 2))
+            st.dataframe(
+                summary_df[["model", "avg_gap_pct", "max_gap_pct", "bias_pct", "tendency"]],
+                hide_index=True,
+                use_container_width=True,
+            )
         if not cal_base.empty and {"predicted_mean", "observed_rate"}.issubset(cal_base.columns):
             chart_base = cal_base[["predicted_mean", "observed_rate"]].copy()
             chart_base.columns = ["Predicted (Baseline)", "Observed (Baseline)"]

@@ -1,12 +1,13 @@
 import os
 import json
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional
 import re
 import html
 import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus
+from email.utils import parsedate_to_datetime
 
 import joblib
 import numpy as np
@@ -37,7 +38,13 @@ MONITORING_REPORT_PATH = os.path.join('reports', 'monitoring_report.json')
 PREDICTION_LOG_PATH = os.path.join('reports', 'prediction_log.csv')
 PREDICTION_QUALITY_REPORT_PATH = os.path.join('reports', 'prediction_quality_report.json')
 CHAMPION_MODEL_PATH = os.path.join('models', 'champion_team_model.pkl')
+SCHEDULE_SOURCE_STATUS_PATH = os.path.join('data', 'raw', 'schedule_source_status.json')
+PIPELINE_STATUS_PATH = os.path.join('data', 'raw', 'pipeline_status_latest.json')
 AVAILABILITY_STALE_HOURS = float(os.environ.get("AVAILABILITY_STALE_HOURS", "12"))
+STRICT_STARTUP_CHECKS = os.environ.get("STRICT_STARTUP_CHECKS", "1").strip().lower() in {"1", "true", "yes"}
+TEAM_CONFIDENCE_Z = float(os.environ.get("TEAM_CONFIDENCE_Z", "1.28"))
+PLAYER_CONFIDENCE_Z = float(os.environ.get("PLAYER_CONFIDENCE_Z", "1.28"))
+NEWS_MAX_AGE_DAYS = int(os.environ.get("NEWS_MAX_AGE_DAYS", "3"))
 
 baseline_model = None
 tree_model = None
@@ -585,6 +592,29 @@ def _latest_opponent_context(opponent_team_id: Optional[int]):
     }
 
 
+def _team_absence_context(team_id: int, game_date=None):
+    injuries = _load_injuries_projection_frame()
+    if injuries.empty or "TEAM_ID" not in injuries.columns:
+        return {"TEAM_ABSENT_SEVERITY": 0.0, "TEAM_ABSENT_COUNT": 0.0}
+    work = injuries.copy()
+    work["TEAM_ID"] = pd.to_numeric(work["TEAM_ID"], errors="coerce")
+    work = work.dropna(subset=["TEAM_ID"]).copy()
+    work["TEAM_ID"] = work["TEAM_ID"].astype(int)
+    work = work[work["TEAM_ID"] == int(team_id)]
+    if work.empty:
+        return {"TEAM_ABSENT_SEVERITY": 0.0, "TEAM_ABSENT_COUNT": 0.0}
+    if "GAME_DATE" in work.columns:
+        work["GAME_DATE"] = pd.to_datetime(work.get("GAME_DATE"), errors="coerce")
+    date_limit = pd.to_datetime(game_date, errors="coerce")
+    if pd.notna(date_limit) and "GAME_DATE" in work.columns:
+        work = work[work["GAME_DATE"] <= date_limit]
+    if work.empty:
+        return {"TEAM_ABSENT_SEVERITY": 0.0, "TEAM_ABSENT_COUNT": 0.0}
+    sev = pd.to_numeric(work.get("INJURY_SEVERITY"), errors="coerce").fillna(0.0)
+    count = float((sev >= 1.0).sum())
+    return {"TEAM_ABSENT_SEVERITY": float(sev.sum()), "TEAM_ABSENT_COUNT": count}
+
+
 def _player_feature_frame_for_inference(
     player_logs: pd.DataFrame,
     player_id: int,
@@ -610,6 +640,9 @@ def _player_feature_frame_for_inference(
     rest_days = float(max(0, min(rest_days, 14)))
     home = 1.0 if 'MATCHUP' in latest and isinstance(latest['MATCHUP'], str) and 'vs.' in latest['MATCHUP'] else 0.0
 
+    role_guard = _recent_mean('AST', 10) / max(_recent_mean('AST', 10) + _recent_mean('REB', 10), 1e-6)
+    role_big = _recent_mean('REB', 10) / max(_recent_mean('AST', 10) + _recent_mean('REB', 10), 1e-6)
+    min_share = _recent_mean('MIN', 10) / max(240.0, 1.0)
     features = {
         'MIN_LAST5': _recent_mean('MIN', 5),
         'PTS_LAST5': _recent_mean('PTS', 5),
@@ -626,9 +659,15 @@ def _player_feature_frame_for_inference(
         'REST_DAYS': rest_days,
         'INJURY_SEVERITY': 0.0,  # set from injuries below
         'GAME_NUMBER': float(len(logs) + 1),
+        'MIN_ROLE_SHARE': float(max(0.01, min(0.9, min_share))),
+        'PLAYER_ROLE_GUARD_SCORE': float(max(0.0, min(1.0, role_guard))),
+        'PLAYER_ROLE_BIG_SCORE': float(max(0.0, min(1.0, role_big))),
     }
     features.update(_latest_opponent_context(opponent_team_id))
     features.update(_latest_team_vegas_context(team_id))
+    features.update(_team_absence_context(team_id, game_date=latest.get('GAME_DATE')))
+    features['OPP_VS_GUARD_AST_ALLOWED_30'] = float(features.get('OPP_DEF_AST_ALLOWED_30', 25.0))
+    features['OPP_VS_BIG_REB_ALLOWED_30'] = float(features.get('OPP_DEF_REB_ALLOWED_30', 44.0))
     return features
 
 
@@ -733,26 +772,62 @@ def _redistribute_absence_impact(players):
     if missing_minutes <= 0 and missing_points <= 0 and missing_rebounds <= 0 and missing_assists <= 0:
         return players
 
-    def _weights(keys):
+    def _role_scores(player):
+        ast = float(player.get('_ast_last10', 0.0))
+        reb = float(player.get('_reb_last10', 0.0))
+        denom = max(ast + reb, 1e-6)
+        guard = max(0.0, min(1.0, ast / denom))
+        big = max(0.0, min(1.0, reb / denom))
+        return guard, big
+
+    out_guard = 0.0
+    out_big = 0.0
+    for p in out_players:
+        g, b = _role_scores(p)
+        role_weight = max(float(p.get('_raw_projected_minutes', 0.0)), 1.0)
+        out_guard += g * role_weight
+        out_big += b * role_weight
+    out_role_total = max(out_guard + out_big, 1e-6)
+    out_guard_share = out_guard / out_role_total
+    out_big_share = out_big / out_role_total
+
+    def _weights(keys, role_alignment=None):
         weights = []
         for p in available:
             val = 1.0
             for k, floor in keys:
                 val *= max(float(p.get(k, floor)), floor)
+            if role_alignment:
+                g, b = _role_scores(p)
+                align = (
+                    out_guard_share * (g if role_alignment == 'guard' else 0.0) +
+                    out_big_share * (b if role_alignment == 'big' else 0.0)
+                )
+                # Keep a floor to avoid zeroing non-matching players entirely.
+                val *= max(0.35, align * 2.0)
             weights.append(val)
         total = sum(weights) or 1.0
         return [w / total for w in weights]
 
     w_min = _weights([('_min_last10', 8.0)])
-    w_pts = _weights([('_min_last10', 8.0), ('_pts_last10', 2.0)])
-    w_reb = _weights([('_min_last10', 8.0), ('_reb_last10', 1.0)])
-    w_ast = _weights([('_min_last10', 8.0), ('_ast_last10', 1.0)])
+    w_pts = _weights([('_min_last10', 8.0), ('_pts_last10', 2.0)], role_alignment='guard')
+    # Rebounds should flow more to "big-like" profiles when a big is out.
+    w_reb = _weights([('_min_last10', 8.0), ('_reb_last10', 1.0)], role_alignment='big')
+    w_ast = _weights([('_min_last10', 8.0), ('_ast_last10', 1.0)], role_alignment='guard')
 
     for idx, p in enumerate(available):
         p['projected_minutes'] = round(min(44.0, float(p.get('projected_minutes', 0.0)) + missing_minutes * 0.9 * w_min[idx]), 2)
         p['projected_points'] = round(max(0.0, float(p.get('projected_points', 0.0)) + missing_points * 0.9 * w_pts[idx]), 2)
         p['projected_rebounds'] = round(max(0.0, float(p.get('projected_rebounds', 0.0)) + missing_rebounds * 0.9 * w_reb[idx]), 2)
         p['projected_assists'] = round(max(0.0, float(p.get('projected_assists', 0.0)) + missing_assists * 0.9 * w_ast[idx]), 2)
+        for key in [
+            'projected_minutes_ci_low', 'projected_minutes_ci_high',
+            'projected_points_ci_low', 'projected_points_ci_high',
+            'projected_rebounds_ci_low', 'projected_rebounds_ci_high',
+            'projected_assists_ci_low', 'projected_assists_ci_high',
+        ]:
+            if key in p:
+                p[key] = round(max(0.0, float(p[key])), 2)
     return players
 
 
@@ -770,11 +845,31 @@ def _apply_opponent_context(players, opponent_factors):
             p['projected_points'] = 0.0
             p['projected_rebounds'] = 0.0
             p['projected_assists'] = 0.0
+            for key in [
+                'projected_minutes_ci_low', 'projected_minutes_ci_high',
+                'projected_points_ci_low', 'projected_points_ci_high',
+                'projected_rebounds_ci_low', 'projected_rebounds_ci_high',
+                'projected_assists_ci_low', 'projected_assists_ci_high',
+            ]:
+                if key in p:
+                    p[key] = 0.0
             continue
         p['projected_minutes'] = round(max(0.0, float(p.get('projected_minutes', 0.0)) * pace_like), 2)
         p['projected_points'] = round(max(0.0, float(p.get('projected_points', 0.0)) * pf), 2)
         p['projected_rebounds'] = round(max(0.0, float(p.get('projected_rebounds', 0.0)) * rf), 2)
         p['projected_assists'] = round(max(0.0, float(p.get('projected_assists', 0.0)) * af), 2)
+        if 'projected_minutes_ci_low' in p:
+            p['projected_minutes_ci_low'] = round(max(0.0, float(p['projected_minutes_ci_low']) * pace_like), 2)
+            p['projected_minutes_ci_high'] = round(max(0.0, float(p['projected_minutes_ci_high']) * pace_like), 2)
+        if 'projected_points_ci_low' in p:
+            p['projected_points_ci_low'] = round(max(0.0, float(p['projected_points_ci_low']) * pf), 2)
+            p['projected_points_ci_high'] = round(max(0.0, float(p['projected_points_ci_high']) * pf), 2)
+        if 'projected_rebounds_ci_low' in p:
+            p['projected_rebounds_ci_low'] = round(max(0.0, float(p['projected_rebounds_ci_low']) * rf), 2)
+            p['projected_rebounds_ci_high'] = round(max(0.0, float(p['projected_rebounds_ci_high']) * rf), 2)
+        if 'projected_assists_ci_low' in p:
+            p['projected_assists_ci_low'] = round(max(0.0, float(p['projected_assists_ci_low']) * af), 2)
+            p['projected_assists_ci_high'] = round(max(0.0, float(p['projected_assists_ci_high']) * af), 2)
     return players
 
 
@@ -883,6 +978,12 @@ def _model_based_player_projection(team_id: int, game_date=None, opponent_team_i
 
     X = pd.DataFrame(rows)[feature_columns].fillna(0.0)
     is_two_stage = minutes_model is not None and rate_model is not None
+    uncertainty = player_projection_artifact.get('uncertainty', {}) if isinstance(player_projection_artifact, dict) else {}
+    z_value = float(uncertainty.get('z_value', PLAYER_CONFIDENCE_Z))
+    min_sigma = float(uncertainty.get('minutes_rmse', 3.0))
+    pts_sigma = float(uncertainty.get('PTS_rmse', 4.0))
+    reb_sigma = float(uncertainty.get('REB_rmse', 2.5))
+    ast_sigma = float(uncertainty.get('AST_rmse', 2.0))
     if is_two_stage:
         pred_minutes = np.clip(minutes_model.predict(X), 0.0, 48.0)
         pred_rates = np.clip(rate_model.predict(X), 0.0, None)
@@ -919,6 +1020,14 @@ def _model_based_player_projection(team_id: int, game_date=None, opponent_team_i
             'projected_points': round(pts, 2),
             'projected_rebounds': round(reb, 2),
             'projected_assists': round(ast, 2),
+            'projected_minutes_ci_low': round(max(0.0, minutes - z_value * min_sigma), 2),
+            'projected_minutes_ci_high': round(max(0.0, minutes + z_value * min_sigma), 2),
+            'projected_points_ci_low': round(max(0.0, pts - z_value * pts_sigma), 2),
+            'projected_points_ci_high': round(max(0.0, pts + z_value * pts_sigma), 2),
+            'projected_rebounds_ci_low': round(max(0.0, reb - z_value * reb_sigma), 2),
+            'projected_rebounds_ci_high': round(max(0.0, reb + z_value * reb_sigma), 2),
+            'projected_assists_ci_low': round(max(0.0, ast - z_value * ast_sigma), 2),
+            'projected_assists_ci_high': round(max(0.0, ast + z_value * ast_sigma), 2),
             '_raw_projected_minutes': float(minutes),
             '_raw_projected_points': float(pts),
             '_raw_projected_rebounds': float(reb),
@@ -951,6 +1060,13 @@ def _model_based_player_projection(team_id: int, game_date=None, opponent_team_i
         'context_adjustment': {
             'absence_redistribution': True,
             'opponent_factors': opp_factors,
+            'uncertainty_model': {
+                'z_value': z_value,
+                'minutes_rmse': min_sigma,
+                'PTS_rmse': pts_sigma,
+                'REB_rmse': reb_sigma,
+                'AST_rmse': ast_sigma,
+            },
         },
         'covered_player_ids': [p.get('player_id') for p in projections if p.get('player_id') is not None],
     }
@@ -1136,6 +1252,18 @@ def _short_quote(text: str, limit: int = 120):
 
 
 def _fetch_game_headlines(home_team_name: str, away_team_name: str, max_items: int = 5):
+    def _pub_dt(pub_text: str):
+        if not pub_text:
+            return None
+        try:
+            dt = parsedate_to_datetime(pub_text)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, NEWS_MAX_AGE_DAYS))
     query = f"{away_team_name} vs {home_team_name} NBA injuries"
     url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
     try:
@@ -1151,12 +1279,17 @@ def _fetch_game_headlines(home_team_name: str, away_team_name: str, max_items: i
             pub = (item.findtext("pubDate") or "").strip()
             if not title or not link:
                 continue
+            pub_dt = _pub_dt(pub)
+            # Enforce strict recency so game briefs stay relevant.
+            if pub_dt is None or pub_dt < cutoff:
+                continue
             items.append({
                 "source": source,
                 "title": title,
                 "url": link,
                 "quote": _short_quote(desc or title, limit=110),
                 "published_at": pub,
+                "published_at_utc": pub_dt.isoformat(),
             })
             if len(items) >= max_items:
                 break
@@ -1218,7 +1351,12 @@ def _advisory_narrative(game, probability_report, top_recommendation, headlines)
     line3 = "News context unavailable from feed; rely more on injury snapshot + model features." if not headlines else (
         f"News pulse: pulled {len(headlines)} recent headlines relevant to this matchup."
     )
-    return " ".join([line1, line2, line3]).strip()
+    ci_low = probability_report.get("home_win_ci_low")
+    ci_high = probability_report.get("home_win_ci_high")
+    line4 = ""
+    if ci_low is not None and ci_high is not None:
+        line4 = f"Confidence band (home win): {float(ci_low)*100:.1f}% to {float(ci_high)*100:.1f}%."
+    return " ".join([line1, line2, line3, line4]).strip()
 
 
 def _load_monitoring_report():
@@ -1286,6 +1424,33 @@ def _load_prediction_quality_report():
         return {"available": False, "detail": f"Failed to read prediction quality report: {exc}"}
 
 
+def _load_schedule_source_status():
+    if not os.path.exists(SCHEDULE_SOURCE_STATUS_PATH):
+        return {"available": False, "detail": "schedule_source_status.json not found."}
+    try:
+        with open(SCHEDULE_SOURCE_STATUS_PATH, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        payload["available"] = True
+        return payload
+    except Exception as exc:
+        return {"available": False, "detail": f"Failed to read schedule source status: {exc}"}
+
+
+def _load_pipeline_status():
+    if not os.path.exists(PIPELINE_STATUS_PATH):
+        return {
+            "available": False,
+            "detail": "pipeline_status_latest.json not found. Run scripts/update_pipeline.py.",
+        }
+    try:
+        with open(PIPELINE_STATUS_PATH, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        payload["available"] = True
+        return payload
+    except Exception as exc:
+        return {"available": False, "detail": f"Failed to read pipeline status: {exc}"}
+
+
 def _append_prediction_log_row(row: Dict[str, object]):
     os.makedirs(os.path.dirname(PREDICTION_LOG_PATH), exist_ok=True)
     headers = [
@@ -1310,19 +1475,241 @@ def _append_prediction_log_row(row: Dict[str, object]):
         writer.writerow({k: row.get(k) for k in headers})
 
 
+def _team_probability_interval(home_prob: float, request, resolved_game_id: str):
+    model_choice = (request.model or "baseline").lower()
+    candidates = [float(home_prob)]
+    for alt in ["baseline", "tree", "champion"]:
+        if (request.model or "baseline").lower() == alt:
+            continue
+        try:
+            _, alt_model = _resolve_model(alt)
+        except Exception:
+            continue
+        try:
+            inference_df = _load_inference_features_df()
+            home_row = _inference_team_row(inference_df, resolved_game_id, request.home_team_id)
+            away_row = _inference_team_row(inference_df, resolved_game_id, request.away_team_id)
+            if home_row is None or away_row is None:
+                continue
+            hf = _model_features_from_team_row(
+                model=alt_model, team_row=home_row, team_id=request.home_team_id,
+                home_team_id=request.home_team_id, away_team_id=request.away_team_id, is_home=True
+            )
+            af = _model_features_from_team_row(
+                model=alt_model, team_row=away_row, team_id=request.away_team_id,
+                home_team_id=request.home_team_id, away_team_id=request.away_team_id, is_home=False
+            )
+            h = float(_predict_from_features(alt, hf)['probability'])
+            a = float(_predict_from_features(alt, af)['probability'])
+            den = h + a
+            if den > 0:
+                candidates.append(float(h / den))
+        except Exception:
+            continue
+    spread = float(np.std(candidates)) if len(candidates) > 1 else 0.03
+    calibrated_halfwidth, calibration_rows = _historical_calibrated_halfwidth(model_choice=model_choice, default_halfwidth=TEAM_CONFIDENCE_Z * spread)
+    halfwidth = max(TEAM_CONFIDENCE_Z * spread, calibrated_halfwidth)
+    low = max(0.01, float(home_prob) - halfwidth)
+    high = min(0.99, float(home_prob) + halfwidth)
+    return {
+        "home_win_ci_low": round(low, 6),
+        "home_win_ci_high": round(high, 6),
+        "model_spread_std": round(spread, 6),
+        "num_models": len(candidates),
+        "calibrated_halfwidth": round(float(halfwidth), 6),
+        "calibration_rows": int(calibration_rows),
+    }
+
+
+def _historical_calibrated_halfwidth(model_choice: str, default_halfwidth: float = 0.08):
+    if not os.path.exists(PREDICTION_LOG_PATH) or not os.path.exists(PROCESSED_DATA_PATH):
+        return float(default_halfwidth), 0
+    try:
+        pred = pd.read_csv(PREDICTION_LOG_PATH)
+        actual = pd.read_csv(PROCESSED_DATA_PATH)
+    except Exception:
+        return float(default_halfwidth), 0
+    if pred.empty or actual.empty:
+        return float(default_halfwidth), 0
+    needed_pred = {"game_id", "home_team_id", "home_win_probability", "model"}
+    needed_actual = {"GAME_ID", "TEAM_ID", "WIN"}
+    if not needed_pred.issubset(pred.columns) or not needed_actual.issubset(actual.columns):
+        return float(default_halfwidth), 0
+
+    pred = pred.copy()
+    pred["game_id"] = pred["game_id"].astype(str)
+    pred["home_team_id"] = pd.to_numeric(pred["home_team_id"], errors="coerce")
+    pred["home_win_probability"] = pd.to_numeric(pred["home_win_probability"], errors="coerce")
+    pred["model"] = pred["model"].astype(str).str.lower()
+    pred = pred.dropna(subset=["home_team_id", "home_win_probability"])
+    if pred.empty:
+        return float(default_halfwidth), 0
+    pred["home_team_id"] = pred["home_team_id"].astype(int)
+    pred = pred[pred["model"] == str(model_choice).lower()]
+    if pred.empty:
+        return float(default_halfwidth), 0
+
+    actual = actual.copy()
+    actual["GAME_ID"] = actual["GAME_ID"].astype(str)
+    actual["TEAM_ID"] = pd.to_numeric(actual["TEAM_ID"], errors="coerce")
+    actual["WIN"] = pd.to_numeric(actual["WIN"], errors="coerce")
+    actual = actual.dropna(subset=["TEAM_ID", "WIN"])
+    if actual.empty:
+        return float(default_halfwidth), 0
+    actual["TEAM_ID"] = actual["TEAM_ID"].astype(int)
+
+    merged = pred.merge(
+        actual.rename(columns={"GAME_ID": "game_id", "TEAM_ID": "home_team_id", "WIN": "actual_home_win"}),
+        how="inner",
+        on=["game_id", "home_team_id"],
+    )
+    merged = merged.dropna(subset=["actual_home_win"])
+    if merged.empty:
+        return float(default_halfwidth), 0
+    y_true = pd.to_numeric(merged["actual_home_win"], errors="coerce").fillna(0.0).clip(0.0, 1.0)
+    y_prob = pd.to_numeric(merged["home_win_probability"], errors="coerce").fillna(0.5).clip(0.001, 0.999)
+    abs_err = (y_true - y_prob).abs()
+    if abs_err.empty:
+        return float(default_halfwidth), 0
+    q = float(abs_err.quantile(0.80))
+    q = float(max(0.03, min(0.35, q)))
+    return q, int(len(abs_err))
+
+
+def _confidence_drivers(home_prob: float, away_prob: float, availability_status: Dict[str, object], model_spread_std: float = 0.0):
+    drivers = []
+    edge = abs(float(home_prob) - float(away_prob))
+    drivers.append({
+        "factor": "model_edge_strength",
+        "impact": "positive" if edge >= 0.08 else "neutral",
+        "detail": f"home-away probability gap={edge:.3f}",
+    })
+
+    monitoring = _load_monitoring_report()
+    drift_status = (monitoring.get("drift") or {}).get("status")
+    if drift_status in {"high_drift", "moderate_drift"}:
+        drivers.append({
+            "factor": "data_drift",
+            "impact": "negative",
+            "detail": f"monitoring drift status={drift_status}",
+        })
+    else:
+        drivers.append({
+            "factor": "data_drift",
+            "impact": "neutral",
+            "detail": f"monitoring drift status={drift_status or 'unknown'}",
+        })
+
+    if availability_status.get("is_stale") or availability_status.get("is_empty"):
+        drivers.append({
+            "factor": "availability_freshness",
+            "impact": "negative",
+            "detail": availability_status.get("warning") or "availability stale/empty",
+        })
+    else:
+        drivers.append({
+            "factor": "availability_freshness",
+            "impact": "positive",
+            "detail": "availability snapshot fresh and non-empty",
+        })
+    drivers.append({
+        "factor": "model_divergence",
+        "impact": "negative" if model_spread_std >= 0.06 else ("neutral" if model_spread_std >= 0.03 else "positive"),
+        "detail": f"cross-model std={float(model_spread_std):.3f}",
+    })
+    return drivers
+
+
+def _data_quality_alerts(availability_status: Dict[str, object], monitoring_payload: Dict[str, object], schedule_source: Dict[str, object]):
+    items = []
+    if availability_status.get("is_empty"):
+        items.append({
+            "name": "availability_empty",
+            "severity": "warn",
+            "message": availability_status.get("warning") or "Availability snapshot is empty",
+        })
+    elif availability_status.get("is_stale"):
+        items.append({
+            "name": "availability_stale",
+            "severity": "warn",
+            "message": availability_status.get("warning") or "Availability snapshot is stale",
+        })
+
+    mon_alerts = (monitoring_payload.get("alerts") or {}).get("items") or []
+    for a in mon_alerts:
+        items.append({
+            "name": a.get("name"),
+            "severity": a.get("severity", "warn"),
+            "message": a.get("message", ""),
+        })
+
+    source_used = schedule_source.get("source_used") if isinstance(schedule_source, dict) else None
+    if source_used in {"retained_previous", "odds_fallback", "espn_fallback"}:
+        sev = "warn" if source_used != "retained_previous" else "fail"
+        items.append({
+            "name": "schedule_fallback_active",
+            "severity": sev,
+            "message": f"Schedule source used: {source_used}",
+        })
+
+    overall = "pass"
+    if any(i.get("severity") == "fail" for i in items):
+        overall = "fail"
+    elif any(i.get("severity") == "warn" for i in items):
+        overall = "warn"
+    return {"overall_status": overall, "items": items}
+
+
+def _startup_required_paths():
+    return [
+        PROCESSED_DATA_PATH,
+        UPCOMING_GAMES_PATH,
+        INFERENCE_FEATURES_PATH,
+        MODEL_PATH,
+        TREE_MODEL_PATH,
+        PLAYER_MODEL_PATH,
+    ]
+
+
+def _run_startup_checks():
+    missing = [p for p in _startup_required_paths() if not os.path.exists(p)]
+    model_loaded = any(m is not None for m in [baseline_model, tree_model, champion_model])
+    if missing or not model_loaded:
+        message = (
+            f"Startup checks failed. missing_paths={missing}; "
+            f"baseline_loaded={baseline_model is not None}; "
+            f"tree_loaded={tree_model is not None}; "
+            f"champion_loaded={champion_model is not None}"
+        )
+        if STRICT_STARTUP_CHECKS:
+            raise RuntimeError(message)
+        print(f"Warning: {message}")
+
+
+@app.on_event("startup")
+def startup_event():
+    _run_startup_checks()
+
+
 @app.get('/')
 def root():
     return {
         'service': app.title,
         'version': app.version,
         'status': 'ok',
-        'routes': ['/health', '/sample-features', '/features', '/monitoring', '/prediction-quality', '/upcoming-games', '/predict', '/predict/sample', '/predict/team', '/docs'],
+        'routes': ['/health', '/sample-features', '/features', '/monitoring', '/prediction-quality', '/pipeline-status', '/upcoming-games', '/predict', '/predict/sample', '/predict/team', '/docs'],
     }
 
 
 @app.get('/health')
 def health():
-    return {'status': 'ok'}
+    pipeline = _load_pipeline_status()
+    return {
+        'status': 'ok',
+        'pipeline_status_available': bool(pipeline.get("available", False)),
+        'pipeline_last_run_id': pipeline.get("run_id"),
+        'pipeline_last_status': pipeline.get("status"),
+    }
 
 
 @app.get('/sample-features')
@@ -1359,6 +1746,8 @@ def features():
         'processed_numeric_features': processed_numeric,
         'monitoring_report_available': os.path.exists(MONITORING_REPORT_PATH),
         'prediction_quality_report_available': os.path.exists(PREDICTION_QUALITY_REPORT_PATH),
+        'schedule_source_status_available': os.path.exists(SCHEDULE_SOURCE_STATUS_PATH),
+        'pipeline_status_available': os.path.exists(PIPELINE_STATUS_PATH),
     }
 
 
@@ -1370,6 +1759,11 @@ def monitoring():
 @app.get('/prediction-quality')
 def prediction_quality():
     return _load_prediction_quality_report()
+
+
+@app.get('/pipeline-status')
+def pipeline_status():
+    return _load_pipeline_status()
 
 
 @app.get('/upcoming-games')
@@ -1463,8 +1857,11 @@ def predict_team(request: TeamPredictionRequest):
         'raw_away_probability': round(away_raw, 6),
         'calculation_note': 'Normalized from independent team-win estimates to enforce home+away=1.0.',
     }
+    probability_report.update(_team_probability_interval(home_prob, request, resolved_game_id))
     explain_home = _prediction_explanation(model_choice, model, home_features, top_n=10)
     explain_away = _prediction_explanation(model_choice, model, away_features, top_n=10)
+    monitoring_payload = _load_monitoring_report()
+    schedule_source = _load_schedule_source_status()
 
     response = {
         'game': {
@@ -1502,6 +1899,9 @@ def predict_team(request: TeamPredictionRequest):
         },
         'data_quality': {
             'availability': availability_status,
+            'monitoring_alerts': (monitoring_payload.get("alerts") or {}),
+            'schedule_source': schedule_source,
+            'alerts': _data_quality_alerts(availability_status, monitoring_payload, schedule_source),
         },
     }
 
@@ -1537,6 +1937,12 @@ def predict_team(request: TeamPredictionRequest):
         "narrative": _advisory_narrative(response["game"], probability_report, top_rec, headlines),
         "top_recommendation": top_rec,
         "recent_headlines": headlines,
+        "confidence_drivers": _confidence_drivers(
+            home_prob,
+            away_prob,
+            availability_status,
+            model_spread_std=float(probability_report.get("model_spread_std", 0.0)),
+        ),
     }
 
     _append_prediction_log_row({

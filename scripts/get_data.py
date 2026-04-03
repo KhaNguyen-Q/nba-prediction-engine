@@ -71,6 +71,18 @@ def _fallback_existing_or_empty(save_path, columns, label):
     return empty
 
 
+def _load_existing_non_empty_csv(path):
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path)
+        if df.empty:
+            return pd.DataFrame()
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 def _get_current_season(reference_date=None):
     if reference_date is None:
         reference_date = datetime.utcnow()
@@ -326,6 +338,7 @@ def fetch_injuries_data(save_path=os.path.join(RAW_DIR, "injuries_raw.csv"), tea
     ensure_data_dirs()
     print(f"Fetching injuries data from ESPN: {ESPN_INJURY_URL}")
     rows = []
+    fetch_failed = False
 
     try:
         response = requests.get(ESPN_INJURY_URL, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -366,8 +379,10 @@ def fetch_injuries_data(save_path=os.path.join(RAW_DIR, "injuries_raw.csv"), tea
                 })
     except requests.RequestException as err:
         print(f"Warning: failed to fetch injuries data: {err}")
+        fetch_failed = True
     except ValueError as err:
         print(f"Warning: invalid JSON from injuries source: {err}")
+        fetch_failed = True
 
     expected_columns = [
         'TEAM_ID',
@@ -419,6 +434,12 @@ def fetch_injuries_data(save_path=os.path.join(RAW_DIR, "injuries_raw.csv"), tea
                 np.where(injuries['INJURY_SEVERITY'] >= 0.5, 'Probable', 'Available')
             )
         )
+    if injuries.empty and fetch_failed:
+        cached = _load_existing_non_empty_csv(save_path)
+        if not cached.empty:
+            print(f"Retaining cached injuries data from {save_path} with {len(cached)} rows")
+            return cached
+
     if injuries.empty:
         injuries = pd.DataFrame(columns=expected_columns)
     else:
@@ -552,6 +573,7 @@ def fetch_odds_data(save_path=os.path.join(RAW_DIR, "odds_raw.csv")):
     api_key_header = os.environ.get('ODDS_API_KEY_HEADER', ODDS_API_KEY_HEADER)
     api_host = os.environ.get('ODDS_API_HOST', ODDS_API_HOST)
     odds_df = pd.DataFrame()
+    existing_odds = _load_existing_non_empty_csv(save_path)
 
     if ODDS_API_CACHE_PATH and ODDS_USE_CACHE:
         cached = _load_cached_odds_data(ODDS_API_CACHE_PATH)
@@ -613,9 +635,15 @@ def fetch_odds_data(save_path=os.path.join(RAW_DIR, "odds_raw.csv")):
         except ValueError as err:
             print(f"Warning: invalid JSON from odds provider: {err}")
     else:
+        if not existing_odds.empty:
+            print(f"No ODDS_API_KEY found; retaining cached odds file with {len(existing_odds)} rows.")
+            return existing_odds
         print("No ODDS_API_KEY found; creating placeholder odds file.")
 
     if odds_df.empty:
+        if not existing_odds.empty:
+            print(f"Odds fetch returned empty; retaining cached odds file with {len(existing_odds)} rows.")
+            return existing_odds
         odds_df = pd.DataFrame(columns=[
             'COMMENCE_TIME',
             'HOME_TEAM',

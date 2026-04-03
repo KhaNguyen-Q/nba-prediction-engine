@@ -11,6 +11,10 @@ UPCOMING_PATH = "data/raw/upcoming_games.csv"
 INFERENCE_PATH = "data/processed/upcoming_inference_features.csv"
 INJURIES_LATEST_PATH = "data/raw/injuries_latest.csv"
 REPORT_PATH = "reports/monitoring_report.json"
+DAILY_SUMMARY_PATH = "reports/monitoring_daily_summary.csv"
+ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL")
+STALE_ALERT_HOURS = float(os.environ.get("STALE_ALERT_HOURS", "8"))
+HIGH_DRIFT_PSI = float(os.environ.get("HIGH_DRIFT_PSI", "0.25"))
 
 CORE_FEATURES = [
     "pts_last10",
@@ -117,10 +121,111 @@ def generate_monitoring_report(
         },
         "drift": _drift_section(processed),
     }
+    report["alerts"] = _alerts_section(report)
+    _append_daily_summary(report)
+    _send_webhook_if_needed(report)
     with open(report_path, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
     print(f"Wrote monitoring report to {report_path}")
     return report
+
+
+def _alerts_section(report):
+    alerts = []
+    freshness = report.get("freshness", {})
+    drift = report.get("drift", {})
+
+    up = freshness.get("upcoming_games", {})
+    inf = freshness.get("inference_features", {})
+    inj = freshness.get("injuries_latest", {})
+
+    for name, section in [("upcoming_games", up), ("inference_features", inf), ("injuries_latest", inj)]:
+        if not section.get("exists", False):
+            alerts.append({"name": f"{name}_missing", "severity": "fail", "message": f"{name} file missing"})
+            continue
+        age = section.get("age_hours")
+        try:
+            age_f = float(age)
+            if age_f > STALE_ALERT_HOURS:
+                alerts.append({
+                    "name": f"{name}_stale",
+                    "severity": "warn",
+                    "message": f"{name} stale: {age_f:.2f}h > {STALE_ALERT_HOURS:.2f}h",
+                })
+        except Exception:
+            pass
+
+    if os.path.exists(UPCOMING_PATH):
+        try:
+            up_df = pd.read_csv(UPCOMING_PATH)
+            if up_df.empty:
+                alerts.append({"name": "upcoming_games_empty", "severity": "fail", "message": "upcoming_games.csv has 0 rows"})
+        except Exception:
+            alerts.append({"name": "upcoming_games_unreadable", "severity": "fail", "message": "upcoming_games.csv unreadable"})
+
+    max_psi = drift.get("max_psi")
+    if max_psi is not None:
+        try:
+            max_psi_f = float(max_psi)
+            if max_psi_f >= HIGH_DRIFT_PSI:
+                alerts.append({
+                    "name": "high_drift",
+                    "severity": "warn",
+                    "message": f"max_psi={max_psi_f:.4f} >= {HIGH_DRIFT_PSI:.4f}",
+                })
+        except Exception:
+            pass
+    overall = "pass"
+    if any(a["severity"] == "fail" for a in alerts):
+        overall = "fail"
+    elif any(a["severity"] == "warn" for a in alerts):
+        overall = "warn"
+    return {"overall_status": overall, "items": alerts}
+
+
+def _append_daily_summary(report):
+    row = {
+        "generated_at_utc": report.get("generated_at_utc"),
+        "alert_status": (report.get("alerts") or {}).get("overall_status"),
+        "drift_status": (report.get("drift") or {}).get("status"),
+        "max_psi": (report.get("drift") or {}).get("max_psi"),
+        "avg_psi": (report.get("drift") or {}).get("avg_psi"),
+        "upcoming_age_hours": ((report.get("freshness") or {}).get("upcoming_games") or {}).get("age_hours"),
+        "inference_age_hours": ((report.get("freshness") or {}).get("inference_features") or {}).get("age_hours"),
+        "injuries_age_hours": ((report.get("freshness") or {}).get("injuries_latest") or {}).get("age_hours"),
+        "num_alerts": len(((report.get("alerts") or {}).get("items") or [])),
+    }
+    row_df = pd.DataFrame([row])
+    os.makedirs(os.path.dirname(DAILY_SUMMARY_PATH), exist_ok=True)
+    if os.path.exists(DAILY_SUMMARY_PATH):
+        try:
+            hist = pd.read_csv(DAILY_SUMMARY_PATH)
+            out = pd.concat([hist, row_df], ignore_index=True)
+        except Exception:
+            out = row_df
+    else:
+        out = row_df
+    out.to_csv(DAILY_SUMMARY_PATH, index=False)
+
+
+def _send_webhook_if_needed(report):
+    if not ALERT_WEBHOOK_URL:
+        return
+    alerts = (report.get("alerts") or {}).get("items") or []
+    if not alerts:
+        return
+    payload = {
+        "text": (
+            f"[NBA Monitoring] status={(report.get('alerts') or {}).get('overall_status')} "
+            f"alerts={len(alerts)} generated_at={report.get('generated_at_utc')}"
+        ),
+        "alerts": alerts[:10],
+    }
+    try:
+        import requests
+        requests.post(ALERT_WEBHOOK_URL, json=payload, timeout=6)
+    except Exception:
+        pass
 
 
 def main():
