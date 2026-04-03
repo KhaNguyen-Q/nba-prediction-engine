@@ -6,6 +6,7 @@ import shutil
 REGISTRY_INDEX_PATH = "models/registry/index.json"
 CHAMPION_MODEL_PATH = "models/champion_team_model.pkl"
 CHAMPION_META_PATH = "models/champion_team_model_meta.json"
+PROMOTION_MIN_IMPROVEMENT = float(os.environ.get("PROMOTION_MIN_IMPROVEMENT", "0.005"))
 
 SUPPORTED = {"logistic_baseline", "xgb_tree_model", "automl_challenger"}
 
@@ -67,8 +68,58 @@ def promote_champion_model():
 
     candidates = sorted(candidates, key=lambda x: x["score"])
     winner = candidates[0]
-    os.makedirs(os.path.dirname(CHAMPION_MODEL_PATH), exist_ok=True)
-    shutil.copyfile(winner["model_path"], CHAMPION_MODEL_PATH)
+    incumbent = None
+    if os.path.exists(CHAMPION_META_PATH):
+        try:
+            incumbent = _load_json(CHAMPION_META_PATH)
+        except Exception:
+            incumbent = None
+    incumbent_score = None
+    incumbent_name = None
+    incumbent_source_model_path = None
+    if isinstance(incumbent, dict):
+        incumbent_score = incumbent.get("score")
+        incumbent_name = incumbent.get("champion_model_name")
+        incumbent_source_model_path = incumbent.get("source_model_path")
+        try:
+            incumbent_score = float(incumbent_score) if incumbent_score is not None else None
+        except Exception:
+            incumbent_score = None
+
+    should_promote = True
+    promotion_reason = "no incumbent"
+    if incumbent_score is not None:
+        if winner["score"] <= (incumbent_score - PROMOTION_MIN_IMPROVEMENT):
+            should_promote = True
+            promotion_reason = (
+                f"winner score improved from {incumbent_score:.6f} to {winner['score']:.6f} "
+                f"(min improvement={PROMOTION_MIN_IMPROVEMENT:.6f})"
+            )
+        else:
+            should_promote = False
+            promotion_reason = (
+                f"winner score {winner['score']:.6f} did not beat incumbent {incumbent_score:.6f} "
+                f"by required margin {PROMOTION_MIN_IMPROVEMENT:.6f}"
+            )
+
+    if should_promote:
+        os.makedirs(os.path.dirname(CHAMPION_MODEL_PATH), exist_ok=True)
+        shutil.copyfile(winner["model_path"], CHAMPION_MODEL_PATH)
+    else:
+        if incumbent_source_model_path and os.path.exists(incumbent_source_model_path):
+            winner = {
+                "model_name": incumbent_name or winner["model_name"],
+                "model_path": incumbent_source_model_path,
+                "registry_entry_path": incumbent.get("registry_entry_path"),
+                "score": float(incumbent_score),
+                "trained_at": incumbent.get("trained_at"),
+                "holdout": incumbent.get("holdout", {}),
+            }
+        else:
+            should_promote = True
+            promotion_reason = "incumbent artifact missing; promoting winner"
+            os.makedirs(os.path.dirname(CHAMPION_MODEL_PATH), exist_ok=True)
+            shutil.copyfile(candidates[0]["model_path"], CHAMPION_MODEL_PATH)
 
     meta = {
         "champion_model_name": winner["model_name"],
@@ -79,10 +130,16 @@ def promote_champion_model():
         "trained_at": winner.get("trained_at"),
         "holdout": winner.get("holdout", {}),
         "runner_ups": candidates[1:3],
+        "promoted": bool(should_promote),
+        "promotion_reason": promotion_reason,
+        "promotion_min_improvement": PROMOTION_MIN_IMPROVEMENT,
     }
     with open(CHAMPION_META_PATH, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=2)
-    print(f"Promoted champion model: {winner['model_name']} -> {CHAMPION_MODEL_PATH}")
+    if should_promote:
+        print(f"Promoted champion model: {winner['model_name']} -> {CHAMPION_MODEL_PATH}")
+    else:
+        print(f"Champion unchanged: {promotion_reason}")
     return meta
 
 

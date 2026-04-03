@@ -1,6 +1,4 @@
-
-# nba-prediction-engine
-=======
+# NBA Prediction Project
 
 ## Project Overview
 
@@ -297,6 +295,7 @@ Current active phase: **Phase 3.5 - Optimization and Hardening (IN PROGRESS)**.
 - prediction explainability panel in dashboard (baseline linear contributions, tree SHAP-style contributions)
 - color-coded explainability bars with tooltips (green=positive, red=negative impact)
 - AI Game Brief panel with recent matchup headlines, short quote snippets, and top confidence stat recommendation
+- pipeline health endpoint (`GET /pipeline-status`) backed by latest scheduler run metadata
 - dashboard-side baseline vs tree comparison panel for model divergence checks on the same upcoming game
 - leakage-safe training guardrails for tree/AutoML to prevent post-game feature contamination
 - rolling time-series validation metrics in training scripts
@@ -482,6 +481,31 @@ Current focus:
 11. Champion/challenger promotion:
    - completed: `scripts/model_promotion.py` promotes best registry candidate to `models/champion_team_model.pkl`.
    - completed: API can serve champion model using `model=champion`.
+12. Data reliability hardening:
+   - completed: schedule ingestion now uses multi-source fallback (`nba_api` -> ESPN -> odds -> retain previous non-empty file).
+   - completed: schedule source status metadata is written to `data/raw/schedule_source_status.json`.
+   - completed: transient injury/odds fetch failures now preserve cached non-empty files instead of destructive overwrite.
+13. Player projection quality and uncertainty:
+   - completed: player model now includes stronger context features (minutes role share, teammate absence load, opponent role-defense proxies).
+   - completed: player projections now return uncertainty bands (low/high) for minutes, points, rebounds, assists.
+14. Retrain/promotion guardrails:
+   - completed: retraining now requires minimum-data thresholds (processed rows, upcoming rows, player-log rows) unless force-retrain is set.
+   - completed: champion promotion now requires minimum improvement margin before replacing incumbent.
+15. Monitoring alerts and summaries:
+   - completed: monitoring report now includes pass/warn/fail alert items for staleness, drift, and empty upcoming schedule.
+   - completed: daily monitoring summary is appended to `reports/monitoring_daily_summary.csv`.
+   - completed: optional webhook posting is supported via `ALERT_WEBHOOK_URL`.
+16. Deployment/runtime hardening:
+   - completed: docker-compose now runs API + scheduler together.
+- completed: API startup checks can block startup when required artifacts are missing (`STRICT_STARTUP_CHECKS=1`).
+17. UX trust signals:
+   - completed: API now returns confidence drivers (availability freshness, drift, model divergence).
+   - completed: team probability confidence intervals are returned in `probability_report`.
+   - completed: Streamlit now displays team/player confidence intervals and “why confidence changed” factors.
+18. Pre-SQL robustness completion:
+   - completed: lineup-shock redistribution now uses role-aware weighting (guard/big proxies) to better reallocate rebounds/assists when key players are out.
+   - completed: team confidence intervals now blend cross-model spread with calibrated historical prediction error from scored logs.
+   - completed: API now exposes consolidated pass/warn/fail data-quality alerts for UI consumption.
 
 Run commands for this phase:
 1. `python scripts/train_baseline.py`
@@ -518,11 +542,54 @@ Current focus:
    - add calibration, drift tracking, and backtest monitoring panels.
 4. Data reliability:
    - harden schedule and inference refresh when NBA upstream endpoints are unstable.
+5. Backend persistence (SQL):
+   - add PostgreSQL as the system-of-record for pipeline runs, predictions, and monitoring metrics.
+   - keep CSV outputs as fallback/export, but read operational state from SQL first.
 
 Exit criteria for Phase 4:
 1. API can be started and validated via documented smoke tests.
 2. Containerized run works on a clean machine.
 3. Dashboard displays live predictions and player projections from saved model artifacts.
+
+### SQL backend plan (recommended before major UI work)
+
+Yes, we should add a backend SQL database now. This will make the UI easier and more reliable later.
+
+Initial scope:
+1. Add PostgreSQL service in `docker-compose.yml`.
+2. Add migration scripts (Alembic or SQL bootstrap) for core tables:
+   - `pipeline_runs`
+   - `predictions`
+   - `prediction_quality`
+   - `monitoring_reports`
+   - `upcoming_games`
+   - `availability_snapshots`
+3. Update API writes:
+   - `POST /predict/team` logs to SQL (with CSV mirror optional).
+4. Update pipeline writes:
+   - `scripts/update_pipeline.py` writes run status + retrain decisions to SQL.
+5. Add read endpoints:
+   - latest pipeline run status
+   - historical prediction quality trend
+   - drift trend history
+
+Implementation sequence:
+1. Backend first (schema + write paths + read endpoints).
+2. Validation layer second (smoke test checks DB connectivity + row writes).
+3. UI implementation last (bind charts/tables to API data that is backed by SQL).
+
+Why this order:
+- prevents UI rework
+- gives durable history for model governance
+- makes deployment behavior consistent across machines
+
+One-command runtime (API + scheduler):
+```bash
+docker compose up --build
+```
+This starts:
+- `api` (`uvicorn api.main:app`)
+- `scheduler` (`python scripts/update_pipeline.py` with `PIPELINE_MODE=scheduler`)
 
 ### Good extension points
 
@@ -557,5 +624,4 @@ This README is the living architectural document for the repository. Whenever ne
 
 ---
 
-_Last updated on March 31, 2026 (Phase 4 in progress)._
->>>>>>> 7f294d3 (Phase 3.5 optimization + README update)
+_Last updated on April 2, 2026 (Phase 4 planning + SQL backend roadmap)._

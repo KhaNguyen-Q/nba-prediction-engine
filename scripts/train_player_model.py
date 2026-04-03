@@ -32,6 +32,9 @@ BASE_FEATURES = [
     'HOME', 'REST_DAYS', 'INJURY_SEVERITY', 'GAME_NUMBER',
     'OPP_DEF_PTS_ALLOWED_30', 'OPP_DEF_REB_ALLOWED_30', 'OPP_DEF_AST_ALLOWED_30',
     'OPP_PACE_30', 'VEGAS_IMPLIED_TEAM_TOTAL_10',
+    'MIN_ROLE_SHARE', 'TEAM_ABSENT_SEVERITY', 'TEAM_ABSENT_COUNT',
+    'OPP_VS_GUARD_AST_ALLOWED_30', 'OPP_VS_BIG_REB_ALLOWED_30',
+    'PLAYER_ROLE_GUARD_SCORE', 'PLAYER_ROLE_BIG_SCORE',
 ]
 
 
@@ -143,6 +146,13 @@ def merge_opponent_team_context(player_df, processed_path=PROCESSED_PATH):
         'OPP_DEF_AST_ALLOWED_30': 25.0,
         'OPP_PACE_30': 99.0,
         'VEGAS_IMPLIED_TEAM_TOTAL_10': 110.0,
+        'MIN_ROLE_SHARE': 0.2,
+        'TEAM_ABSENT_SEVERITY': 0.0,
+        'TEAM_ABSENT_COUNT': 0.0,
+        'OPP_VS_GUARD_AST_ALLOWED_30': 25.0,
+        'OPP_VS_BIG_REB_ALLOWED_30': 44.0,
+        'PLAYER_ROLE_GUARD_SCORE': 0.5,
+        'PLAYER_ROLE_BIG_SCORE': 0.5,
     }
     if not os.path.exists(processed_path):
         for col, val in fallback_defaults.items():
@@ -245,6 +255,41 @@ def merge_opponent_team_context(player_df, processed_path=PROCESSED_PATH):
         direction='backward',
     )
 
+    # Player role proxy from historical style: guards are assist-heavy, bigs are rebound-heavy.
+    ast = pd.to_numeric(out.get('AST_LAST10'), errors='coerce').fillna(0.0)
+    reb = pd.to_numeric(out.get('REB_LAST10'), errors='coerce').fillna(0.0)
+    role_denom = (ast + reb).replace(0, np.nan)
+    out['PLAYER_ROLE_GUARD_SCORE'] = (ast / role_denom).fillna(0.5).clip(0.0, 1.0)
+    out['PLAYER_ROLE_BIG_SCORE'] = (reb / role_denom).fillna(0.5).clip(0.0, 1.0)
+
+    # Minutes role share within team context.
+    out['MIN_ROLE_SHARE'] = (
+        pd.to_numeric(out.get('MIN_LAST10'), errors='coerce').fillna(0.0) /
+        out.groupby(['TEAM_ID', 'GAME_DATE'])['MIN_LAST10'].transform(lambda s: pd.to_numeric(s, errors='coerce').fillna(0.0).sum()).replace(0, np.nan)
+    ).fillna(0.2).clip(0.01, 0.9)
+
+    # Teammate-absence context at same date.
+    if os.path.exists(INJURIES_PATH):
+        try:
+            inj = pd.read_csv(INJURIES_PATH)
+            if not inj.empty and {'TEAM_ID', 'GAME_DATE', 'INJURY_SEVERITY'}.issubset(inj.columns):
+                inj['TEAM_ID'] = pd.to_numeric(inj['TEAM_ID'], errors='coerce')
+                inj['GAME_DATE'] = _utc_naive(inj.get('GAME_DATE'))
+                inj['INJURY_SEVERITY'] = pd.to_numeric(inj.get('INJURY_SEVERITY'), errors='coerce').fillna(0.0)
+                inj = inj.dropna(subset=['TEAM_ID', 'GAME_DATE']).copy()
+                inj['TEAM_ID'] = inj['TEAM_ID'].astype(int)
+                daily = inj.groupby(['TEAM_ID', 'GAME_DATE'], as_index=False).agg(
+                    TEAM_ABSENT_SEVERITY=('INJURY_SEVERITY', 'sum'),
+                    TEAM_ABSENT_COUNT=('INJURY_SEVERITY', lambda s: float((pd.to_numeric(s, errors='coerce').fillna(0.0) >= 1.0).sum()))
+                )
+                out = out.merge(daily, how='left', on=['TEAM_ID', 'GAME_DATE'])
+        except Exception:
+            pass
+
+    # Opponent role defense proxies.
+    out['OPP_VS_GUARD_AST_ALLOWED_30'] = pd.to_numeric(out.get('OPP_DEF_AST_ALLOWED_30'), errors='coerce')
+    out['OPP_VS_BIG_REB_ALLOWED_30'] = pd.to_numeric(out.get('OPP_DEF_REB_ALLOWED_30'), errors='coerce')
+
     for col, val in fallback_defaults.items():
         out[col] = pd.to_numeric(out.get(col), errors='coerce').fillna(float(val))
     return out
@@ -337,6 +382,16 @@ def train_player_model():
     print(f"MIN MAE: {minutes_metrics['mae']:.3f}")
     print(f"MIN RMSE: {minutes_metrics['rmse']:.3f}")
 
+    residual_minutes = (y_test_minutes.values - pred_minutes)
+    residual_stats = y_test.values - pred
+    uncertainty = {
+        "z_value": 1.28,
+        "minutes_rmse": float(np.sqrt(np.mean(np.square(residual_minutes)))) if len(residual_minutes) else 0.0,
+        "PTS_rmse": float(np.sqrt(np.mean(np.square(residual_stats[:, 0])))) if residual_stats.size else 0.0,
+        "REB_rmse": float(np.sqrt(np.mean(np.square(residual_stats[:, 1])))) if residual_stats.size else 0.0,
+        "AST_rmse": float(np.sqrt(np.mean(np.square(residual_stats[:, 2])))) if residual_stats.size else 0.0,
+    }
+
     artifact = {
         'projection_version': 'two_stage_minutes_rates',
         'minutes_model': minutes_model,
@@ -348,6 +403,7 @@ def train_player_model():
         'test_rows': len(test_df),
         'split': split_desc,
         'trained_at': pd.Timestamp.utcnow().isoformat(),
+        'uncertainty': uncertainty,
     }
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     joblib.dump(artifact, MODEL_PATH)
@@ -362,6 +418,7 @@ def train_player_model():
         metrics={
             "holdout_minutes": minutes_metrics,
             "holdout_by_target": metrics_by_target,
+            "uncertainty": uncertainty,
         },
         split_description=split_desc,
         extra={
