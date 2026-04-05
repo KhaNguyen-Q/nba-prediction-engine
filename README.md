@@ -668,4 +668,4 @@ This README is the living architectural document for the repository. Whenever ne
 
 ---
 
-_Last updated on April 2, 2026 (Phase 4 planning + SQL backend roadmap)._
+_Last updated on April 4, 2026 (Phase 4 planning + SQL backend roadmap)._
