@@ -9,11 +9,11 @@ services:
     environment:
       - PIPELINE_MODE=once
       - STRICT_STARTUP_CHECKS=1
+      - DATABASE_URL=postgresql://nba:nba@postgres:5432/nba
     volumes:
-      - ./:/app
+      - .:/app
     depends_on:
       - postgres
-      - scheduler
     command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   scheduler:
@@ -22,10 +22,27 @@ services:
     environment:
       - PIPELINE_MODE=scheduler
       - STRICT_STARTUP_CHECKS=0
+      - DATABASE_URL=postgresql://nba:nba@postgres:5432/nba
     volumes:
-      - ./:/app
+      - .:/app
     command: ["python", "scripts/update_pipeline.py"]
     restart: unless-stopped
+    depends_on:
+      - postgres
+
+  streamlit:
+    build: .
+    container_name: nba_streamlit_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      # Use the service name 'api' so Docker's internal DNS finds the container
+      - API_URL=http://api:8000
+    volumes:
+      - .:/app
+    depends_on:
+      - api
+    command: ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
 
   postgres:
     image: postgres:15

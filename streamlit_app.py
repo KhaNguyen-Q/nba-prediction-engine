@@ -1,4 +1,6 @@
 import json
+import os
+
 from pathlib import Path
 
 try:
@@ -228,7 +230,8 @@ def load_upcoming_games(api_base):
 
 with st.sidebar:
     st.header("Controls")
-    api_base = st.text_input("API Base URL", value="http://127.0.0.1:8000")
+    default_api = os.getenv("API_URL", "http://127.0.0.1:8000")
+    api_base = st.text_input("API Base URL", value=default_api)
     model = st.selectbox("Model", options=["baseline", "tree", "champion"], index=0)
     compare_models = st.toggle("Compare Baseline vs Tree", value=True)
     include_player_projection = st.toggle("Include Player Projection", value=True)
@@ -257,7 +260,7 @@ with st.sidebar:
         else:
             st.error("No upcoming games available from API.")
 
-    run_prediction = st.button("Run Team Prediction", type="primary", use_container_width=True)
+    run_prediction = st.button("Run Team Prediction", type="primary", width="stretch")
 
 col_left, col_right = st.columns([2, 1], gap="large")
 
@@ -376,13 +379,13 @@ with col_right:
 
     st.subheader("Smoke Tests")
     smoke_col1, smoke_col2 = st.columns(2)
-    if smoke_col1.button("Test /health", use_container_width=True):
+    if smoke_col1.button("Test /health", width="stretch"):
         payload, err = safe_get_json(f"{api_base}/health")
         if err:
             st.error(err)
         else:
             st.json(payload)
-    if smoke_col2.button("Test /predict/sample", use_container_width=True):
+    if smoke_col2.button("Test /predict/sample", width="stretch"):
         payload, err = safe_get_json(f"{api_base}/predict/sample?model={model}")
         if err:
             st.error(err)
@@ -604,7 +607,7 @@ with col_left:
                                 data=home_df.to_csv(index=False),
                                 file_name="home_player_projections.csv",
                                 mime="text/csv",
-                                use_container_width=True,
+                                width="stretch",
                             )
                     with tab_away:
                         st.caption(away_proj.get("projection_method", ""))
@@ -639,7 +642,7 @@ with col_left:
                                 data=away_df.to_csv(index=False),
                                 file_name="away_player_projections.csv",
                                 mime="text/csv",
-                                use_container_width=True,
+                                width="stretch",
                             )
 
                 with st.expander("Raw API Response", expanded=False):
