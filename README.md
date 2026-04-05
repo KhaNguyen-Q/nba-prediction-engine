@@ -36,26 +36,35 @@ API Docs: http://localhost:8000/docs
 ### Option 2: The Manual Way (Local Python Environment)
 If you prefer to run the services individually, follow this execution order:
 
-1. Environment Setup
+
+1.
+Environment Setup
+   
 Ensure you have a PostgreSQL instance running locally with a database named nba.
 
-Bash
 `pip install -r requirements.txt`
-2. Run the Data Pipeline
+
+2. 
+Run the Data Pipeline
+
 This script scrapes the latest data, builds features, and initializes the local cache.
 
-Bash
 `python scripts/update_pipeline.py`
-3. Start the FastAPI Backend
+
+3.
+Start the FastAPI Backend
+
 Open a new terminal and launch the Uvicorn server:
 
-Bash
 `uvicorn api.main:app --host 0.0.0.0 --port 8000`
-4. Launch the Streamlit Dashboard
+
+4. 
+Launch the Streamlit Dashboard
+
 Open a second terminal and run:
 
-Bash
 `streamlit run streamlit_app.py`
+
 Note: Ensure the sidebar "API Base URL" is set to http://127.0.0.1:8000 when running locally.
 
 ## Architecture
