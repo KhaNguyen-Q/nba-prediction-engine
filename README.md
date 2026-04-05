@@ -18,6 +18,8 @@ The current implementation includes:
 ### Option 1: The Docker Way (Recommended)
 This is the fastest way to get the entire stack (Database, API, Scheduler, and UI) running in a synchronized environment.
 
+Have Docker desktop open
+
 Clone the repository:
 
 Bash
