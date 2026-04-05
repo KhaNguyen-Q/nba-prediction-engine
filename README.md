@@ -14,48 +14,48 @@ The current implementation includes:
 - a dedicated player projection model pipeline
 - FastAPI prediction service and Streamlit dashboard
 
-##🚀 Getting Started (Two Options)
-Option 1: The Docker Way (Recommended)
+## 🚀 Getting Started (Two Options)
+### Option 1: The Docker Way (Recommended)
 This is the fastest way to get the entire stack (Database, API, Scheduler, and UI) running in a synchronized environment.
 
 Clone the repository:
 
 Bash
-git clone <your-repo-link>
-cd <folder-name>
+`git clone <your-repo-link>`
+`cd <folder-name>`
 Launch the stack:
 
 Bash
-docker-compose up --build
+`docker-compose up --build`
 Access the App:
 
 Frontend: http://localhost:8501
 
 API Docs: http://localhost:8000/docs
 
-Option 2: The Manual Way (Local Python Environment)
+### Option 2: The Manual Way (Local Python Environment)
 If you prefer to run the services individually, follow this execution order:
 
 1. Environment Setup
 Ensure you have a PostgreSQL instance running locally with a database named nba.
 
 Bash
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 2. Run the Data Pipeline
 This script scrapes the latest data, builds features, and initializes the local cache.
 
 Bash
-python scripts/update_pipeline.py
+`python scripts/update_pipeline.py`
 3. Start the FastAPI Backend
 Open a new terminal and launch the Uvicorn server:
 
 Bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+`uvicorn api.main:app --host 0.0.0.0 --port 8000`
 4. Launch the Streamlit Dashboard
 Open a second terminal and run:
 
 Bash
-streamlit run streamlit_app.py
+`streamlit run streamlit_app.py`
 Note: Ensure the sidebar "API Base URL" is set to http://127.0.0.1:8000 when running locally.
 
 ## Architecture
