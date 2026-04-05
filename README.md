@@ -21,12 +21,15 @@ This is the fastest way to get the entire stack (Database, API, Scheduler, and U
 Clone the repository:
 
 Bash
-`git clone <your-repo-link>`
-`cd <folder-name>`
+`git clone https://github.com/KhaNguyen-Q/nba-prediction-engine`
+
+`cd nba-prediction-engine`
+
 Launch the stack:
 
 Bash
 `docker-compose up --build`
+
 Access the App:
 
 Frontend: http://localhost:8501
