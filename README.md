@@ -35,14 +35,17 @@ What it does today:
 
 ## 🎬 Demo
 
-The Streamlit dashboard connects to the FastAPI backend and surfaces model status, pipeline health, monitoring, and prediction-quality panels. Pick an upcoming game and model in the sidebar to generate a win-probability report with player projections and per-feature explanations.
+Pick an upcoming game and model in the sidebar, then **Run Team Prediction**. The dashboard connects to the FastAPI backend and returns a normalized win-probability report, a baseline-vs-tree model comparison, fair moneylines, per-feature explanations, and availability-adjusted player projections.
 
 <div align="center">
-  <img src="docs/assets/dashboard.webp" alt="Streamlit dashboard connected to the FastAPI backend" width="80%" />
-  <br/><sub>Dashboard shell connected to the API (fresh environment, before the data pipeline is run).</sub>
+  <img src="docs/assets/nba1.png" alt="NBA Prediction Dashboard connected to the API with baseline, tree, and player-projection models loaded" width="90%" />
+  <br/><sub>Dashboard connected to the API — baseline, tree, and player-projection models loaded, with live pipeline status.</sub>
   <br/><br/>
-  <img src="docs/assets/health_smoke_test.webp" alt="In-app /health smoke test returning status ok" width="60%" />
-  <br/><sub>Built-in smoke test calling the live backend <code>/health</code> endpoint.</sub>
+  <img src="docs/assets/nba2.png" alt="Win-probability report and baseline-vs-tree model comparison for Toronto Raptors @ Boston Celtics" width="90%" />
+  <br/><sub>Team win-probability report (home/away %, fair moneylines, confidence interval) with a baseline-vs-tree model comparison.</sub>
+  <br/><br/>
+  <img src="docs/assets/nba3.png" alt="Two-stage player projection table with per-player availability" width="90%" />
+  <br/><sub>Two-stage player projections (minutes → per-minute rates → box score), availability-adjusted per player.</sub>
 </div>
 
 ---
