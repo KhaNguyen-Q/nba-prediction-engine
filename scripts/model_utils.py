@@ -160,9 +160,15 @@ def select_game_level_rows(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     work = df.copy()
+    # Guard against duplicate column labels (e.g. HOME selected twice).
+    if not work.columns.is_unique:
+        work = work.loc[:, ~work.columns.duplicated()].copy()
     work["GAME_ID"] = work["GAME_ID"].astype(str)
     if "HOME" in work.columns:
-        home_mask = pd.to_numeric(work["HOME"], errors="coerce") == 1
+        home_series = work["HOME"]
+        if isinstance(home_series, pd.DataFrame):
+            home_series = home_series.iloc[:, 0]
+        home_mask = pd.to_numeric(home_series, errors="coerce") == 1
         home = work.loc[home_mask]
         if not home.empty:
             return home.drop_duplicates(subset=["GAME_ID"], keep="first")

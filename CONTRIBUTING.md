@@ -90,6 +90,14 @@ python scripts/build_inference_features.py
 
 Training features are leakage-safe historical rows. Inference features recompute upcoming-matchup fields for serving.
 
+If `stats.nba.com` is unreachable, you can generate an offline synthetic dataset first:
+
+```bash
+python scripts/simulate_offline_dataset.py
+```
+
+Then run the feature/train scripts as usual (README metrics table was produced this way when live ingest timed out).
+
 ### 4. Train models
 
 ```bash

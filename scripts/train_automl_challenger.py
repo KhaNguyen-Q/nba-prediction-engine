@@ -103,7 +103,11 @@ def run_automl_challenger():
     for col in ["GAME_DATE", "GAME_ID", "HOME"]:
         if col in df.columns:
             meta_cols.append(col)
-    data = df[numeric_features + meta_cols].dropna(subset=["WIN"]).copy()
+    keep_cols = list(dict.fromkeys(numeric_features + meta_cols))
+    data = df.loc[:, [c for c in keep_cols if c in df.columns]].copy()
+    data = data.dropna(subset=["WIN"]).copy()
+    if not data.columns.is_unique:
+        data = data.loc[:, ~data.columns.duplicated()].copy()
     X_all = data[numeric_features]
     y_all = data["WIN"].astype(int)
     candidates = candidate_models()

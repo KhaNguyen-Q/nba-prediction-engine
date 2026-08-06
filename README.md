@@ -95,13 +95,18 @@ flowchart LR
 
 ### Results
 
-No metrics are reported here because none should be fabricated. After training on your ingested dataset, populate this table from `scripts/generate_prediction_quality_report.py` and the model registry:
+Holdout metrics below were produced by running the real feature + training scripts on an **offline synthetic NBA-like schedule** (live `stats.nba.com` timed out in this environment). Evaluation is **game-level** (one row per `GAME_ID`, home perspective). Re-run after a successful live ingest to replace these with season-true numbers.
 
 | Model | Accuracy | Log Loss | Brier | ROC-AUC |
 | --- | :---: | :---: | :---: | :---: |
-| Baseline | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| Tree | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| Ensemble / champion blend | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| Baseline (logistic) | 0.566 | 0.687 | 0.247 | 0.590 |
+| Tree (XGBoost) | 0.559 | 1.032 | 0.316 | 0.586 |
+| Champion (AutoML → logreg_l2) | 0.604 | 0.669 | 0.238 | 0.613 |
+
+Notes from this run:
+- Champion promotion selected **AutoML challenger** (`logreg_l2`) over baseline/tree using the weighted log-loss/Brier score.
+- Default XGBoost without tuning underperformed on probabilistic metrics here — a useful interview talking point about calibration vs raw accuracy.
+- Source registry entries: `models/registry/*` (generated locally; gitignored).
 
 ---
 
