@@ -12,7 +12,6 @@ if ROOT_DIR not in sys.path:
 from scripts.team_utils import (
     find_team_location,
     find_team_profile,
-    get_team_adult_quality,
     get_team_timezone_offset,
     haversine_distance,
 )
@@ -167,13 +166,6 @@ def _fatigue_index(rest_days, back_to_back, travel_km, tz_diff):
         0.2 * min(max(float(travel_km) / 3000.0, 0.0), 1.0) +
         0.1 * min(abs(float(tz_diff)), 3.0)
     )
-
-
-def _adult_entertainment_index(is_away, home_team_id):
-    if not is_away:
-        return 0.0
-    quality = get_team_adult_quality(team_id=int(home_team_id), default=5)
-    return float(np.clip(11 - quality, 1, 10))
 
 
 def _clear_stale_odds(row):
@@ -347,7 +339,6 @@ def build_inference_features(
             row['TRAVEL_DISTANCE'] = travel_km
             row['TIMEZONE_SHIFT'] = tz_diff
             row['fatigue_index'] = _fatigue_index(rest, back_to_back, travel_km, tz_diff)
-            row['ADULT_ENTERTAINMENT_INDEX'] = _adult_entertainment_index(not is_home, home_id)
             row['INJURY_IMPACT'] = _current_team_injury_impact(injuries, team_id, game_date)
             row = _apply_odds_for_side(row, odds_row, is_home)
             row['HOME_TEAM'] = float(home_id)

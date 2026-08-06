@@ -67,9 +67,9 @@ Scripts pull data from the outside world and save CSV files under `data/raw/`.
 | Baseline logistic regression | `scripts/train_baseline.py` | `models/logistic_baseline.pkl` |
 | XGBoost tree | `scripts/train_tree_model.py` | `models/xgb_tree_model.pkl` |
 | AutoML challenger bake-off | `scripts/train_automl_challenger.py` | challenger artifact + registry entry |
-| Ensemble stacker | `scripts/train_ensemble.py` | ensemble artifact (not champion-eligible) |
-| LSTM sequential | `scripts/train_sequential.py` | experimental only |
 | Player projection | `scripts/train_player_model.py` | `models/player_projection_model.pkl` |
+
+> Unfinished LSTM / stacking-ensemble stubs were **removed** from the repo (see §8). They remain valid *future* improvement topics only if rebuilt with holdout metrics, registry entries, and API wiring.
 
 Shared helpers: `scripts/model_utils.py` (metrics, time splits, leakage-safe column filter, registry writer).
 
@@ -211,7 +211,6 @@ How inference works in plain English:
    - rest / back-to-back
    - travel + timezone from last venue → upcoming venue
    - fatigue index
-   - adult-entertainment away index
    - injury impact as-of the upcoming date
    - upcoming odds when available (otherwise clear stale odds from the copied base row)
 6. Save: `data/processed/upcoming_inference_features.csv`
@@ -289,28 +288,13 @@ Analogy: a giant flowchart of yes/no questions:
 
 Trees are great for messy tabular sports data with nonlinear interactions. The API can show SHAP-like contribution explanations for tree predictions.
 
-### Ensemble / Stacker — “The Panel of Experts”
+### AutoML Challenger — “The Bake-Off”
 
-**Script:** `scripts/train_ensemble.py`
+**Script:** `scripts/train_automl_challenger.py`
 
-Analogy: Baseline Expert and Tree Expert each cast a vote (a probability). A small meta-model (another logistic regression) learns how to blend those votes.
+Analogy: several student robots take the same test; the one with the best probability score advances.
 
-**Honest status:** Trained in the bootstrap pipeline, but **not** registered for champion promotion and **not** exposed as a first-class API model choice. Mention it as architecture exploration, not the production path.
-
-### LSTM — “The Memory Bot” (experiment only)
-
-**Script:** `scripts/train_sequential.py`
-
-Analogy: a robot that reads the last 8 team game-steps in order, trying to remember “form over time.”
-
-**Why it is NOT production:**
-- Trains briefly (small epoch count)
-- No proper holdout tournament metrics like the others
-- Not champion-eligible
-- Not served by FastAPI model selection
-
-**Interview line:**
-> “I included an LSTM as a sequence experiment. For noisy tabular NBA data, trees/logistic usually win on reliability. The production path promotes on probability metrics, not model fashion.”
+Candidates typically include logistic regression, random forest, and XGBoost. Ranking prioritizes log loss + Brier. The winner is registry-eligible for champion promotion.
 
 ### Player projection model — bonus robot
 
@@ -323,6 +307,8 @@ Two-stage idea:
 3. Multiply → projected box-score stats.
 
 This is separate from the team win-probability champion.
+
+> **Removed from production surface:** unfinished LSTM (`train_sequential.py`) and half-wired stacking ensemble (`train_ensemble.py`). See §8 for why they were deleted and how to talk about bringing them back the right way.
 
 ### The Promotion Gate (`scripts/model_promotion.py`)
 
@@ -461,7 +447,7 @@ Image recipe: `Dockerfile` (Python 3.11, installs `requirements.txt`, default CM
 
 Analogy: instead of saying “install 40 libraries on your laptop and hope,” you ship the whole factory in labeled containers that start the same way on any machine.
 
-### Honest code flaw: Postgres is configured but unused
+### Honest framing: Postgres is provisioned for a real next step
 
 **Facts:**
 - Compose sets `DATABASE_URL=postgresql://nba:nba@postgres:5432/nba`
@@ -469,9 +455,9 @@ Analogy: instead of saying “install 40 libraries on your laptop and hope,” y
 - Current Python serving/pipeline code reads/writes **local CSV / JSON / pickle files**, not Postgres tables
 
 **Professional framing (memorize):**
-> “Postgres is provisioned in the deployment topology for future persistence of predictions, pipeline metadata, or a feature store. Today the serving path is intentionally file-artifact based — simple to inspect and demo. That’s a clear next step, not a hidden dependency.”
+> “Postgres is provisioned in the deployment topology for future persistence of predictions, pipeline metadata, or a feature store. Today the serving path is intentionally file-artifact based — simple to inspect and demo. That’s a roadmap item, not a fake dependency.”
 
-Do **not** claim you have a database-backed feature store.
+Do **not** claim you have a database-backed feature store today. Do **not** apologize for it as negligence — it’s an explicit staging choice (see §8).
 
 Other infrastructure honesty points (if asked):
 - Models load at API import time → scheduler retrain won’t hot-reload a running API without restart.
@@ -504,7 +490,7 @@ IBM DSN (Markham, ON) builds developer education: labs, tutorials, APIs, reprodu
 
 1. **End-to-end ML product, not a notebook:** I built a factory that ingests NBA games/injuries/odds, engineers leakage-safe features, trains multiple models, promotes a champion on log loss/Brier, and serves predictions through FastAPI + a Streamlit dashboard — all Dockerized.
 2. **Designed for honest forecasting:** Rolling features use prior-game-only windows; inference recomputes upcoming matchup features; metrics are evaluated at game-level; and the remaining hard problem I call out is point-in-time odds snapshots.
-3. **Built like something you’d teach with:** Clean REST contract, interactive UI, monitoring/drift reports, and containerized reproducibility — the same muscles needed for developer labs and educational platforms.
+3. **Built like something you’d teach with:** Clean REST contract, interactive UI, monitoring/drift reports, and containerized reproducibility — plus I deliberately removed unfinished experiment stubs instead of leaving fake production surface area.
 
 ### Ultra cheat sheet (pocket card)
 
@@ -515,11 +501,12 @@ IBM DSN (Markham, ON) builds developer education: labs, tutorials, APIs, reprodu
 | Eval unit | Train on team-rows; score holdout at game-level |
 | Hard remaining risk | Pregame odds snapshot / point-in-time market features |
 | Champion rule | Best probabilistic score (log loss + Brier), not flashy architecture |
-| LSTM | Experiment only; not served / not promoted |
+| Production models | Baseline, XGBoost, AutoML challenger, player projection |
+| Removed stubs | LSTM + unfinished ensemble + speculative adult feature |
 | Kitchen / Menu | FastAPI cooks; Streamlit waits tables |
 | Odds fail | Cache or empty CSV; serving continues with warnings |
 | `/predict` | Disabled (410); use `/predict/team` |
-| Postgres | In Compose, unused in Python — file artifacts today |
+| Postgres | Provisioned for future persistence — file artifacts today |
 | DSN bridge | Teachable API + lab UI + reproducible Docker |
 
 ### Files to be able to screen-share
@@ -529,7 +516,7 @@ IBM DSN (Markham, ON) builds developer education: labs, tutorials, APIs, reprodu
 3. `scripts/model_utils.py` — `select_game_level_rows` / promotion metrics helpers
 4. `scripts/model_promotion.py` — the tournament judge
 5. `api/main.py` — `/predict/team` + normalization + startup checks
-6. `docker-compose.yml` — four containers, including unused Postgres (own it)
+6. `docker-compose.yml` — four containers, including Postgres as a planned persistence layer
 
 ### Practice question drill
 
@@ -542,8 +529,8 @@ A: Inference rebuilds matchup features for upcoming games — rolling form from 
 **Q: Why two rows per game if you evaluate once?**  
 A: Team-centric features want both perspectives for training/serving each side; game-level metrics avoid treating paired anti-correlated labels as independent samples.
 
-**Q: Did the LSTM win?**  
-A: It wasn’t in the production tournament path. Champion promotion is among baseline / tree / AutoML challenger using probability metrics.
+**Q: Where did the LSTM / ensemble go?**  
+A: I removed unfinished stubs that weren’t registered, validated, or served. Stacking and sequence models are still valid *future* work — but only when they meet the same production bar as baseline/tree (holdout metrics, registry, API wiring).
 
 **Q: What if an upstream API fails?**  
 A: Fetchers fail soft (cache / empty schema), API serves with data-quality warnings and confidence penalties; hard stop only when schedule, inference features, or models are missing.
@@ -553,4 +540,50 @@ A: Separation of concerns — reusable inference service + rapid educational das
 
 ---
 
-_Last tip: In the interview, lead with software design decisions (modularity, failure modes, promotion gates, offline/online features, game-level evaluation). Use NBA stats only as seasoning, not the main course._
+## 8. 🧹 Removed Experiments vs Real Improvement Topics
+
+Interviewers like seeing that you can tell the difference between:
+- **Dead weight** (half-built, no path to production, or actively confusing), and
+- **Roadmap items** (not done yet, but architecturally justified).
+
+### Removed in this cleanup (no longer in the codebase)
+
+| Item | Why it looked “architectural” | Why it was removed |
+|---|---|---|
+| `scripts/train_sequential.py` (LSTM) | “Deep learning sequence model” on a resume | No holdout metrics, not in registry/promotion, not served by API, short unvalidated training loop. Keeping it implied production readiness that wasn’t true. |
+| `scripts/train_ensemble.py` (stacker) | “Ensemble / stacking” buzzword | Not champion-eligible, not API-exposed, artifact shape didn’t match backtest usage. Half-wired code is worse than a documented future item. |
+| Adult-entertainment index + `add_adult_scores.py` + `adult_quality_rating` config | Speculative contextual feature | Not a serious sports signal, interview liability, no credible future use. Venue context already covered by travel/timezone/fatigue. |
+| `torch` / unused `lightgbm` deps | Broad ML stack signal | Only existed for the deleted LSTM / unused import. Slimming deps makes the project easier to install and demo. |
+
+**How to say it:**
+> “I audited non-production stubs and deleted the ones that couldn’t graduate without a rewrite. I’d rather show a clean production path plus a written roadmap than leave fake surface area in the repo.”
+
+### Kept as intentional improvement topics (still valuable)
+
+| Topic | Why it stays | Interview framing |
+|---|---|---|
+| **Pregame odds snapshots** | Real point-in-time correctness problem | “Market features need a frozen T−1 snapshot policy before I’d trust betting backtests.” |
+| **Postgres wiring** | Compose already provisions DB; files are fine for demos | “Next persistence layer for prediction logs, registry metadata, then a feature store.” |
+| **Production stacking ensemble** | Valid ML idea once bases are stable | “Reintroduce stacking only with game-level eval, registry entry, champion eligibility, and `/predict/team` support.” |
+| **Sequence / deep models** | Possible later with proper MLOps bar | “Only after holdout metrics + promotion path + serve path — not as an orphan `.pt` file.” |
+| **Champion explainability** | Champion can score but lacks contrib explanations | “Extend linear/SHAP-style explainers to whatever artifact is promoted.” |
+| **Model hot-reload** | Scheduler can retrain while API keeps old weights | “Add artifact version watch / graceful reload.” |
+| **Deeper `/health` readiness** | Current health is shallow liveness | “Readiness should verify models + inference features, not just process up.” |
+| **Walk-forward backtests** | Current backtest scores with already-trained models | “Simulate retraining through time for honest ROI claims.” |
+| **LLM matchup summaries** | DSN-aligned educational layer | “Summarize `/predict/team` JSON for labs/tutorials — not a replacement for the model.” |
+| **Statistical promotion gates** | Current gate is metric delta only | “Add bootstrap / paired tests + minimum sample size before swapping champions.” |
+
+### Rule of thumb for future PRs
+
+Something belongs in the **serve/promotion path** only if it has all four:
+
+1. Clear training script with holdout / rolling metrics  
+2. Registry entry (or explicit exemption with docs)  
+3. Artifact loadable by FastAPI (or clearly offline-only tooling)  
+4. Failure mode that doesn’t pretend to be production when it isn’t  
+
+If it’s only an idea, put it in **Future Improvements** — don’t leave a stub that looks live.
+
+---
+
+_Last tip: In the interview, lead with software design decisions (modularity, failure modes, promotion gates, offline/online features, game-level evaluation, and what you chose to delete). Use NBA stats only as seasoning, not the main course._

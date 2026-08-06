@@ -13,8 +13,6 @@ from scripts.build_inference_features import main as build_inference_features_ma
 from scripts.generate_monitoring_report import generate_monitoring_report
 from scripts.train_baseline import train_baseline
 from scripts.train_tree_model import train_tree_model
-from scripts.train_sequential import train_sequential
-from scripts.train_ensemble import train_ensemble
 from scripts.train_player_model import train_player_model
 
 
@@ -49,8 +47,6 @@ def phase2_model_training():
     _run_step("train_baseline", train_baseline)
     _run_step("train_tree_model", train_tree_model)
     _run_step("train_player_model", train_player_model)
-    _run_step("train_sequential", train_sequential)
-    _run_step("train_ensemble", train_ensemble)
 
 
 def main():

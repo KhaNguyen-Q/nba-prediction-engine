@@ -11,7 +11,7 @@ An end-to-end machine-learning platform that ingests NBA data, engineers leakage
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![Docker](https://img.shields.io/badge/Deploy-Docker%20Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![ML](https://img.shields.io/badge/ML-scikit--learn%20·%20XGBoost%20·%20PyTorch-F7931E?style=for-the-badge)](#-models)
+[![ML](https://img.shields.io/badge/ML-scikit--learn%20·%20XGBoost-F7931E?style=for-the-badge)](#-models)
 
 </div>
 
@@ -25,7 +25,7 @@ What it does today:
 
 - **Ingests** raw NBA games, current-season rosters, player game logs, injuries/availability, and sportsbook odds.
 - **Engineers** leakage-safe rolling team stats, rest / back-to-back / fatigue features, market-odds features, and a custom **team-market quality** rating.
-- **Trains** several team win-probability models (baseline, tree, sequential, ensemble) plus a dedicated player-projection model.
+- **Trains** several team win-probability models (baseline, tree, AutoML challenger) plus a dedicated player-projection model.
 - **Serves** normalized home/away win probabilities, fair moneylines, per-feature explanations, and availability-adjusted player projections via FastAPI.
 - **Visualizes** everything in a Streamlit dashboard with live API health, monitoring/drift, and prediction-quality panels.
 
@@ -64,7 +64,7 @@ flowchart LR
     RAW --> FE[Feature engineering<br/>rolling stats · rest/fatigue<br/>market · team-market quality]
     FE --> PROC[(data/processed)]
 
-    PROC --> TR[Model training<br/>baseline · tree · sequential<br/>ensemble · player projection]
+    PROC --> TR[Model training<br/>baseline · tree · AutoML<br/>player projection]
     TR --> REG[(Model registry<br/>+ champion promotion)]
 
     REG --> API[FastAPI service]
@@ -82,7 +82,7 @@ flowchart LR
 - **Rest & fatigue** — rest days, back-to-back flags, travel/timezone context, and a fatigue index.
 - **Availability** — injury severity and out/questionable/probable status folded into team and player projections.
 - **Market features** — sportsbook odds → implied team totals and market signals, with backtesting utilities.
-- **Team-market quality rating** — a custom per-team quality index used as an engineered feature (maintained via `scripts/`).
+- **Team / venue context** — rest, travel distance, timezone shift, and fatigue derived from schedule geography.
 
 ### Models
 
@@ -90,8 +90,7 @@ flowchart LR
 | --- | --- | --- |
 | Baseline | Logistic regression (scaled) | Interpretable team win probability + linear feature contributions |
 | Tree | XGBoost | Non-linear win probability + SHAP-style contributions |
-| Sequential | PyTorch | Sequence/form-aware team model |
-| Ensemble | Blended | Combines model signals |
+| AutoML challenger | Small bake-off (logreg / RF / XGB) | Metric-driven challenger for champion promotion |
 | Player projection | Two-stage (minutes → per-minute rates) | Availability-adjusted points/rebounds/assists with confidence bands |
 
 ### Results
@@ -102,7 +101,7 @@ No metrics are reported here because none should be fabricated. After training o
 | --- | :---: | :---: | :---: | :---: |
 | Baseline | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
 | Tree | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| Ensemble | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| Ensemble / champion blend | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
 
 ---
 
@@ -124,7 +123,7 @@ docker-compose up --build
 ### Option 2 — Local Python
 
 ```bash
-pip install -r requirements.txt          # torch/xgboost/lightgbm — first install is large
+pip install -r requirements.txt          # xgboost included — first install can take a bit
 
 python scripts/update_pipeline.py        # ingest → features → train (needs network for NBA data)
 
@@ -147,8 +146,8 @@ nba-prediction-engine/
 │  ├─ get_data.py / fetch_*.py  # Data ingestion (games, players, injuries, odds, schedule)
 │  ├─ build_features.py         # Leakage-safe feature engineering
 │  ├─ build_inference_features.py
-│  ├─ train_baseline.py / train_tree_model.py / train_sequential.py
-│  ├─ train_ensemble.py / train_player_model.py / train_automl_challenger.py
+│  ├─ train_baseline.py / train_tree_model.py / train_automl_challenger.py
+│  ├─ train_player_model.py
 │  ├─ model_utils.py / model_promotion.py   # Registry & champion promotion
 │  ├─ generate_monitoring_report.py         # Freshness + drift (PSI)
 │  ├─ generate_prediction_quality_report.py # Logged-prediction quality
@@ -158,12 +157,13 @@ nba-prediction-engine/
 ├─ docker-compose.yml  # api + scheduler + streamlit + postgres
 ├─ Dockerfile
 ├─ requirements.txt
+├─ PROJECT_STUDY_GUIDE.md  # Plain-English interview / architecture guide
 ├─ data/               # (generated) raw & processed datasets — gitignored
 ├─ models/             # (generated) trained artifacts & registry — gitignored
 └─ reports/            # (generated) monitoring & quality reports — gitignored
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the documented step-by-step pipeline flows.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the documented step-by-step pipeline flows. See [`PROJECT_STUDY_GUIDE.md`](PROJECT_STUDY_GUIDE.md) for interview prep and the **Removed vs Improvement Topics** audit.
 
 ---
 
@@ -173,17 +173,23 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the documented step-by-step pipelin
 - **Separate the shell from the data.** Keeping generated `data/`/`models/` out of the repo — and letting the API boot in a degraded-but-honest state — makes the project easy to clone and reason about.
 - **Explainability builds trust.** Linear contributions (baseline) and tree contributions (XGBoost) turn a probability into an inspectable decision.
 - **Operate the model, don't just train it.** A registry, champion promotion, drift/PSI monitoring, and a prediction log turn a notebook model into a maintainable service.
+- **Cut unfinished experiments.** Half-wired LSTM/ensemble stubs and speculative features were removed rather than left as fake production surface area.
 
 ---
 
-## 🔭 Future Improvements
+## 🔭 Future Improvements (interview-friendly roadmap)
 
-- Player-level regression beyond the current two-stage projection (opponent-adjusted matchup priors).
-- Calibrated probability outputs and richer backtesting/betting-edge analysis.
+These are intentional next steps — not unfinished leftovers in the serve path:
+
+- **Pregame odds snapshots** with a hard point-in-time cutoff (no post-tip market leakage).
+- **Wire Postgres** for prediction logs, registry metadata, and eventually a feature store (Compose already provisions it).
+- **Production stacking ensemble** (register + serve + game-level eval) once baseline/tree are stable.
+- **Sequence / deep models** only with holdout metrics, registry entries, and API integration — not experimental-only scripts.
+- Calibrated probability outputs and richer walk-forward backtesting.
 - CI that runs `scripts/smoke_test.py` and publishes the results table automatically.
 - Managed deployment (container registry + hosted Postgres) and scheduled retraining.
-- Expanded market features and automated data-quality gating before promotion.
+- Optional LLM matchup summaries on top of `/predict/team` outputs (DSN-aligned educational layer).
 
 ---
 
-<div align="center"><sub>FastAPI · Streamlit · scikit-learn · XGBoost · PyTorch · PostgreSQL · Docker</sub></div>
+<div align="center"><sub>FastAPI · Streamlit · scikit-learn · XGBoost · PostgreSQL · Docker</sub></div>

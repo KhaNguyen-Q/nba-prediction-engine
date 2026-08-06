@@ -10,7 +10,6 @@ if ROOT_DIR not in sys.path:
 
 from scripts.team_utils import (
     is_nba_team_by_id,
-    get_team_adult_quality,
     find_team_location,
     get_team_timezone_offset,
     haversine_distance,
@@ -254,16 +253,6 @@ def add_travel_timezone_features(df):
     return df
 
 
-def add_adult_entertainment_feature(df):
-    df = add_game_location_features(df)
-    df['OPPONENT_ADULT_QUALITY'] = df['OPPONENT'].apply(lambda x: get_team_adult_quality(abbreviation=x) if isinstance(x, str) else 5)
-    # players do better in rooms with worse/bad rated adult entertainment, so we invert quality to difficulty index.
-    df['ADULT_ENTERTAINMENT_INDEX'] = (11 - df['OPPONENT_ADULT_QUALITY']).clip(lower=1, upper=10)
-    # apply only for away games where the team travels
-    df['ADULT_ENTERTAINMENT_INDEX'] = np.where(df['IS_AWAY'] == 1, df['ADULT_ENTERTAINMENT_INDEX'], 0)
-    return df
-
-
 def rolling_team_features(df, windows=(5, 10)):
     df = df.sort_values(['TEAM_ID', 'GAME_DATE'])
 
@@ -414,7 +403,7 @@ def main():
     df = normalize_team_ids(df)
     df = df[df['GAME_DATE'] >= '2022-01-01']
     df = add_label(df)
-    df = add_adult_entertainment_feature(df)
+    df = add_game_location_features(df)
     df = rolling_team_features(df, windows=(5, 10))
     df = add_rest_days(df)
     df = add_travel_timezone_features(df)

@@ -4,13 +4,14 @@ Thanks for helping improve this project. This guide explains how to contribute, 
 
 ## 1. Project purpose
 
-This repository is a modern NBA prediction engine. The current focus is:
-- team win probability prediction
-- NBA-only data ingestion
-- feature engineering for fatigue and rest
-- a baseline logistic regression model
+This repository is a modern NBA prediction engine focused on:
+- team win-probability prediction
+- NBA data ingestion (games, players, injuries, odds, schedule)
+- leakage-safe feature engineering (rolling form, rest/fatigue, travel)
+- baseline logistic regression, XGBoost, AutoML challenger, and player projection
+- FastAPI serving + Streamlit dashboard + Docker Compose orchestration
 
-Future phases include player stat regression, market features, deep learning models, a FastAPI service, and a dashboard.
+See `PROJECT_STUDY_GUIDE.md` for architecture walkthroughs and the audit of removed experiments vs real improvement topics.
 
 ## 2. Working with the repository
 
@@ -45,18 +46,19 @@ Whenever any of the following change, update documentation immediately:
 Primary docs to update:
 - `README.md`
 - `CONTRIBUTING.md`
+- `PROJECT_STUDY_GUIDE.md` (if architecture / interview framing changes)
 - file-level docstrings and comments
 
 ## 4. Project layout summary
 
-- `api/` — planned FastAPI service layer
-- `config/` — canonical team metadata and future location/timezone maps
-- `dashboard/` — dashboard assets and prototypes
-- `data/raw/` — raw ingestion outputs
-- `data/processed/` — engineered datasets
-- `models/` — saved model artifacts
-- `notebooks/` — analysis and prototyping
-- `scripts/` — ingestion, processing, utilities, training
+- `api/` — FastAPI service layer
+- `config/` — canonical team metadata and location/timezone maps
+- `scripts/` — ingestion, feature engineering, training, monitoring, utilities
+- `streamlit_app.py` — interactive dashboard
+- `data/raw/` — raw ingestion outputs (generated, gitignored)
+- `data/processed/` — engineered datasets (generated, gitignored)
+- `models/` — saved model artifacts + registry (generated, gitignored)
+- `reports/` — monitoring / quality reports (generated, gitignored)
 
 ## 5. How to run core flows
 
@@ -74,41 +76,37 @@ This fetches raw NBA games and saves them to `data/raw/games_raw.csv`.
 python scripts/fetch_players.py
 python scripts/fetch_injuries.py
 python scripts/fetch_odds.py
+python scripts/fetch_schedule.py
 ```
 
-These scripts provide placeholders for player, injury, and odds ingestion.
+These scripts ingest players, injuries, odds, and upcoming schedule (with cache/empty-file fallbacks on failure).
 
 ### 3. Build features
 
 ```bash
 python scripts/build_features.py
+python scripts/build_inference_features.py
 ```
 
-This loads raw data, filters NBA teams, labels games, adds rolling stats, and computes fatigue features.
+Training features are leakage-safe historical rows. Inference features recompute upcoming-matchup fields for serving.
 
-### 4. Train tree model
+### 4. Train models
 
 ```bash
+python scripts/train_baseline.py
 python scripts/train_tree_model.py
+python scripts/train_automl_challenger.py
+python scripts/train_player_model.py
+python scripts/model_promotion.py
 ```
-
-This trains an XGBoost model and compares it to the baseline logistic model.
 
 ### 5. Run the full pipeline
 
 ```bash
 python scripts/run_pipeline.py
+# or production-style refresh:
+python scripts/update_pipeline.py
 ```
-
-This executes ingestion, feature engineering, and model training phases together.
-
-### 5. Train baseline model
-
-```bash
-python scripts/train_baseline.py
-```
-
-This trains a logistic regression baseline and saves the model artifact.
 
 ## 6. Coding conventions
 
@@ -117,12 +115,14 @@ This trains a logistic regression baseline and saves the model artifact.
 - Use `scripts/team_utils.py` for any NBA team validation or lookup.
 - Avoid hard-coding NBA team IDs or abbreviations in multiple places.
 - Prefer explicit feature names and comment non-obvious logic.
+- Do not reintroduce unfinished experiment stubs into the serve/promotion path without registry + holdout metrics + API wiring.
 
 ## 7. Testing and validation
 
 - Run scripts locally after any code change.
 - Confirm `data/processed/games_with_features.csv` regenerates cleanly.
-- Confirm the baseline script trains and saves `models/logistic_baseline.pkl`.
+- Confirm baseline/tree scripts train and save artifacts under `models/`.
+- Prefer game-level evaluation helpers in `scripts/model_utils.py` for classification metrics.
 - If you add new data columns, describe them in `README.md`.
 
 ## 8. Adding new features
@@ -130,18 +130,19 @@ This trains a logistic regression baseline and saves the model artifact.
 When adding a new feature or data source:
 1. Add any config metadata to `config/`.
 2. Add helper functions to `scripts/team_utils.py` or a new util module.
-3. Read and filter raw data in `scripts/get_data.py`.
-4. Add feature engineering logic in `scripts/build_features.py`.
-5. Add model training or evaluation in `scripts/train_baseline.py` or a new script.
+3. Read and filter raw data in the relevant `scripts/fetch_*.py` / `get_data.py`.
+4. Add feature engineering logic in `scripts/build_features.py` (and mirror in inference if needed).
+5. Add model training or evaluation in the relevant `train_*.py` script.
 6. Update docs.
 
 ## 9. Notes for future maintainers
 
 - `config/nba_teams.json` is the project’s canonical NBA team source.
 - `scripts/team_utils.py` is the shared team validation API.
-- Keep `README.md` and `CONTRIBUTING.md` synchronized.
-- This project is intentionally built to grow from ingestion → features → model → API.
+- Keep `README.md`, `CONTRIBUTING.md`, and `PROJECT_STUDY_GUIDE.md` synchronized.
+- Postgres in Compose is provisioned for future persistence; current serving is file-artifact based.
+- Production path today: baseline / tree / AutoML challenger / player projection → FastAPI → Streamlit.
 
 ---
 
-_Last updated by the agent on March 27, 2026._
+_Last updated with the experimental-code cleanup (LSTM/ensemble stubs + speculative adult-entertainment feature removed)._

@@ -27,7 +27,7 @@ REQUIRED_FEATURES = [
     'pts_last5', 'reb_last5', 'ast_last5',
     'pts_last10', 'reb_last10', 'ast_last10',
     'REST_DAYS', 'BACK_TO_BACK', 'TRAVEL_DISTANCE', 'TIMEZONE_SHIFT',
-    'fatigue_index', 'ADULT_ENTERTAINMENT_INDEX'
+    'fatigue_index',
 ]
 
 
