@@ -51,21 +51,40 @@ tree_model = None
 champion_model = None
 player_projection_artifact = None
 
+def _unwrap_estimator(artifact):
+    """Normalize joblib artifacts that wrap an estimator in a dict (e.g. AutoML)."""
+    if isinstance(artifact, dict):
+        for key in ("model", "estimator", "pipeline", "meta_model"):
+            inner = artifact.get(key)
+            if inner is not None and hasattr(inner, "predict_proba"):
+                # Prefer feature schema stored alongside wrapped estimators.
+                feature_columns = artifact.get("feature_columns")
+                if feature_columns and not hasattr(inner, "feature_names_in_"):
+                    try:
+                        import numpy as np
+                        inner.feature_names_in_ = np.asarray(list(feature_columns), dtype=object)
+                    except Exception:
+                        pass
+                return inner
+        return None
+    return artifact
+
+
 if os.path.exists(MODEL_PATH):
     try:
-        baseline_model = joblib.load(MODEL_PATH)
+        baseline_model = _unwrap_estimator(joblib.load(MODEL_PATH))
     except Exception:
         baseline_model = None
 
 if os.path.exists(TREE_MODEL_PATH):
     try:
-        tree_model = joblib.load(TREE_MODEL_PATH)
+        tree_model = _unwrap_estimator(joblib.load(TREE_MODEL_PATH))
     except Exception:
         tree_model = None
 
 if os.path.exists(CHAMPION_MODEL_PATH):
     try:
-        champion_model = joblib.load(CHAMPION_MODEL_PATH)
+        champion_model = _unwrap_estimator(joblib.load(CHAMPION_MODEL_PATH))
     except Exception:
         champion_model = None
 
