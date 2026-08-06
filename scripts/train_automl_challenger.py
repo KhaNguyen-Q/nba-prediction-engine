@@ -22,9 +22,10 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from scripts.model_utils import (
-    classification_metrics,
+    classification_metrics_game_level,
     leakage_safe_team_features,
     rolling_time_splits,
+    select_game_level_rows,
     time_aware_train_test_split,
     write_registry_entry,
 )
@@ -98,7 +99,11 @@ def run_automl_challenger():
     if dropped_numeric:
         print(f"Leakage guard removed {len(dropped_numeric)} numeric columns.")
 
-    data = df[numeric_features + ["WIN"] + ([ "GAME_DATE"] if "GAME_DATE" in df.columns else [])].dropna(subset=["WIN"]).copy()
+    meta_cols = ["WIN"]
+    for col in ["GAME_DATE", "GAME_ID", "HOME"]:
+        if col in df.columns:
+            meta_cols.append(col)
+    data = df[numeric_features + meta_cols].dropna(subset=["WIN"]).copy()
     X_all = data[numeric_features]
     y_all = data["WIN"].astype(int)
     candidates = candidate_models()
@@ -114,15 +119,16 @@ def run_automl_challenger():
         for train_idx, test_idx, fold_label in folds:
             X_train = X_all.loc[train_idx]
             y_train = y_all.loc[train_idx]
-            X_test = X_all.loc[test_idx]
-            y_test = y_all.loc[test_idx]
-            if y_train.nunique() < 2 or y_test.nunique() < 2:
+            fold_test_df = data.loc[test_idx]
+            if y_train.nunique() < 2:
+                continue
+            if select_game_level_rows(fold_test_df)["WIN"].nunique() < 2:
                 continue
             est = deepcopy(model)
             est.fit(X_train, y_train)
-            y_pred = est.predict(X_test)
-            y_score = est.predict_proba(X_test)[:, 1]
-            m = classification_metrics(y_test, y_pred, y_score)
+            y_pred = est.predict(fold_test_df[numeric_features])
+            y_score = est.predict_proba(fold_test_df[numeric_features])[:, 1]
+            m = classification_metrics_game_level(fold_test_df, y_pred, y_score)
             m["fold"] = fold_label
             fold_metrics.append(m)
         if not fold_metrics:
@@ -153,13 +159,12 @@ def run_automl_challenger():
     X_train = train_df[numeric_features]
     y_train = train_df["WIN"].astype(int)
     X_test = test_df[numeric_features]
-    y_test = test_df["WIN"].astype(int)
 
     final_model = deepcopy(candidates[winner_name])
     final_model.fit(X_train, y_train)
     y_pred = final_model.predict(X_test)
     y_score = final_model.predict_proba(X_test)[:, 1]
-    holdout = classification_metrics(y_test, y_pred, y_score)
+    holdout = classification_metrics_game_level(test_df, y_pred, y_score)
 
     artifact = {
         "model": final_model,
@@ -184,12 +189,14 @@ def run_automl_challenger():
             "winner_holdout": holdout,
             "leaderboard": leaderboard,
         },
-        split_description=split_desc,
+        split_description=f"{split_desc}; metrics evaluated at game-level",
         extra={
             "candidate_count": len(candidates),
             "xgboost_available": HAS_XGB,
             "train_rows": int(len(X_train)),
             "test_rows": int(len(X_test)),
+            "test_games": int(holdout.get("eval_rows", len(X_test))),
+            "eval_unit": holdout.get("eval_unit", "row"),
         },
     )
     print(f"Wrote registry entry to {registry_path}")

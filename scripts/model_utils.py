@@ -145,6 +145,51 @@ def classification_metrics(y_true, y_pred, y_score) -> Dict[str, float]:
     return out
 
 
+def select_game_level_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Collapse paired home/away team-rows to one evaluation row per game.
+
+    Team-centric feature tables intentionally store two rows per GAME_ID.
+    For holdout/CV metrics we evaluate once per game (home perspective) so
+    anti-correlated labels are not double-counted. Training can still use
+    both rows. Falls back to the input frame when GAME_ID is unavailable.
+    """
+    if df is None or getattr(df, "empty", True):
+        return df
+    if "GAME_ID" not in df.columns:
+        return df
+
+    work = df.copy()
+    work["GAME_ID"] = work["GAME_ID"].astype(str)
+    if "HOME" in work.columns:
+        home_mask = pd.to_numeric(work["HOME"], errors="coerce") == 1
+        home = work.loc[home_mask]
+        if not home.empty:
+            return home.drop_duplicates(subset=["GAME_ID"], keep="first")
+    return work.drop_duplicates(subset=["GAME_ID"], keep="first")
+
+
+def classification_metrics_game_level(
+    frame: pd.DataFrame,
+    y_pred,
+    y_score,
+    label_col: str = "WIN",
+) -> Dict[str, float]:
+    """Score predictions after collapsing to one row per GAME_ID when possible."""
+    scored = frame.copy()
+    scored["_y_pred"] = np.asarray(y_pred)
+    scored["_y_score"] = np.asarray(y_score)
+    eval_frame = select_game_level_rows(scored)
+    metrics = classification_metrics(
+        eval_frame[label_col],
+        eval_frame["_y_pred"],
+        eval_frame["_y_score"],
+    )
+    metrics["eval_rows"] = int(len(eval_frame))
+    metrics["eval_unit"] = "game" if "GAME_ID" in frame.columns else "row"
+    return metrics
+
+
 def regression_metrics(y_true, y_pred) -> Dict[str, float]:
     mae = safe_float(mean_absolute_error(y_true, y_pred))
     rmse = safe_float(np.sqrt(mean_squared_error(y_true, y_pred)))

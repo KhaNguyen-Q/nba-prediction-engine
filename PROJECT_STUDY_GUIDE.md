@@ -1,7 +1,7 @@
 # 🏀 NBA ML Prediction Engine: The Complete Plain-English Guide
 
 > **Who this is for:** You — preparing for a technical interview after ~4 months away from this repo.  
-> **How to use it:** Read sections 1 → 7 in order once. Then drill the elevator pitch and the “Honest Blemishes” until you can say them out loud without looking.
+> **How to use it:** Read sections 1 → 7 in order once. Then drill the elevator pitch and the “Architectural Trade-offs” section until you can say them out loud without looking.
 
 This guide translates every important Machine Learning and Software Engineering idea in this repository into plain English — while staying **100% accurate to the real code paths**.
 
@@ -204,46 +204,60 @@ Injuries are built as an “active burden” over time, then attached to each ga
 How inference works in plain English:
 1. Read historical processed features: `data/processed/games_with_features.csv`
 2. Read upcoming schedule: `data/raw/upcoming_games.csv`
-3. For each team, grab their **latest** processed row (most recent form snapshot).
+3. For each team, start from their latest processed row (schema-compatible base).
 4. Create one home row + one away row for each upcoming game.
-5. Override a few live-ish fields (rest days, home/away, injury impact).
+5. **Recompute** the matchup-critical fields for tip-off:
+   - rolling form from completed games (including the latest box score)
+   - rest / back-to-back
+   - travel + timezone from last venue → upcoming venue
+   - fatigue index
+   - adult-entertainment away index
+   - injury impact as-of the upcoming date
+   - upcoming odds when available (otherwise clear stale odds from the copied base row)
 6. Save: `data/processed/upcoming_inference_features.csv`
 
 The API (`POST /predict/team`) then loads those inference rows and scores them. If a team’s inference row is missing → **503** (“kitchen can’t cook; missing ingredients”).
 
-### The Honest Blemishes (Interview Critique Preparedness)
+### Architectural Trade-offs (Interview Critique Preparedness)
 
-Say these **before** the interviewer finds them. That looks mature.
+These are the kinds of points interviewers want — **design choices and remaining hard problems**, not “I forgot an easy line of code.”
 
-#### 1) Odds Timestamp Leakage Risk
+#### 1) Odds Timestamp Correctness (still the real data-integrity risk)
 
-**What the code does:** Odds are aggregated by home team / away team / commence date and turned into implied probabilities and spreads.
+**What the code does:** Odds are aggregated by home team / away team / commence date and turned into implied probabilities and spreads. Inference now merges upcoming odds when present, and clears stale historical odds when not.
 
-**What’s missing:** There is **no hard “T−1 hour before tip-off” snapshot rule**. If any line in the odds file was updated after the game started (or after you already “know” the result context), market features can become unfairly strong.
-
-**How to say it:**
-> “Odds are a powerful signal, but I would treat them as potentially leaky until ingestion guarantees a frozen pregame snapshot.”
-
-#### 2) Train / Serve Skew
-
-**Training path:** Fully recomputes rolling stats, travel, fatigue, odds joins, etc.
-
-**Serving path:** Copies the latest historical numeric row, then overrides only some fields (rest, home/away, injuries). It does **not** fully recompute rolling windows, upcoming travel, fatigue, or live odds for the new matchup.
-
-**Analogy:** Practice exams use fresh worksheets. Game day, the waiter photocopies yesterday’s worksheet and scribbles a few updates on top.
+**What’s still hard:** There is **no hard “T−1 hour before tip-off” snapshot rule**. Closing lines, live betting updates, or post-tip revisions can make market features look unfairly strong in backtests.
 
 **How to say it:**
-> “The biggest engineering gap is train/serve feature parity. I would unify inference onto the same feature code path as training.”
+> “Odds are a powerful signal. The remaining risk isn’t ‘did we join odds at serve time?’ — it’s point-in-time correctness: freezing a pregame snapshot so training never sees information that wasn’t knowable before tip.”
 
-#### 3) Home vs Away row pairing (anti-correlated evaluation)
+#### 2) Offline Feature Materialization vs Online Recompute (train/serve parity — addressed)
 
-Each NBA game becomes **two rows** (one from the home team’s view, one from the away team’s view). If home wins, away loses — the labels are opposites.
+**What we fixed in code:** `scripts/build_inference_features.py` no longer blindly trusts photocopied rolling/travel/fatigue/odds from the last historical row. It recomputes those fields for the upcoming matchup while keeping a schema-compatible base row for any extra tree-model columns.
 
-If you evaluate accuracy row-by-row without accounting for that pairing, metrics can look a bit “double-counted” or overly confident.
+**What to talk about architecturally (the insight, not the bug):**
+This is the classic MLOps **offline vs online feature** problem:
+- Batch training likes a big historical table.
+- Serving needs “as of now, for a future game.”
+- Options are: recompute on a schedule (what we do), recompute per request (higher latency), or a feature store with point-in-time joins.
 
 **How to say it:**
-> “I’d also evaluate at game-level, not only team-row-level, because home and away rows are paired and anti-correlated.”
+> “I treat train/serve parity as an architecture requirement. Inference materializes upcoming features on the pipeline schedule using the same definitions as training — rolling windows from completed games, venue travel, fatigue, and live odds when available — rather than shipping a stale historical row unchanged.”
 
+#### 3) Team-row training vs Game-level evaluation (pairing — addressed)
+
+**Why two rows exist on purpose:** Team-centric features (form, rest, travel for *this* team) naturally produce a home row and an away row. That design matches how the kitchen scores both sides, then normalizes `home + away = 1.0`.
+
+**What we fixed in code:** Holdout / rolling-CV metrics in `train_baseline.py`, `train_tree_model.py`, and `train_automl_challenger.py` now collapse to **one row per `GAME_ID`** (home perspective) via `select_game_level_rows()` / `classification_metrics_game_level()` in `scripts/model_utils.py`. Training can still use both team-rows; evaluation no longer double-counts anti-correlated labels.
+
+**How to say it:**
+> “The unit of modeling is team-centric, but the unit of the product is a game. So I train on team-rows for feature richness, and I evaluate at game-level so paired home/away outcomes aren’t treated as independent samples.”
+
+#### 4) Remaining deeper topics (if they want senior-level discussion)
+
+- **Effective sample size / dependence:** even with game-level metrics, seasons are autocorrelated; rolling time splits matter more than random K-fold.
+- **Champion promotion without significance tests:** metric gates help, but a bootstrap or paired test would harden promotion further.
+- **Postgres provisioned but unused:** file artifacts are demo-friendly; a DB/feature store is the natural next persistence layer.
 ---
 
 ## 3. 🤖 Part 2: The Model Tournament (“Choosing the Champion”)
@@ -489,7 +503,7 @@ IBM DSN (Markham, ON) builds developer education: labs, tutorials, APIs, reprodu
 ### Opening response: “Tell me about this project.” (3 bullets — memorize)
 
 1. **End-to-end ML product, not a notebook:** I built a factory that ingests NBA games/injuries/odds, engineers leakage-safe features, trains multiple models, promotes a champion on log loss/Brier, and serves predictions through FastAPI + a Streamlit dashboard — all Dockerized.
-2. **Honesty over hype:** Rolling features use prior-game-only `shift(1)` windows; the API only predicts validated upcoming matchups via `/predict/team`. I also know the real gaps — train/serve feature skew and odds needing a hard pregame snapshot.
+2. **Designed for honest forecasting:** Rolling features use prior-game-only windows; inference recomputes upcoming matchup features; metrics are evaluated at game-level; and the remaining hard problem I call out is point-in-time odds snapshots.
 3. **Built like something you’d teach with:** Clean REST contract, interactive UI, monitoring/drift reports, and containerized reproducibility — the same muscles needed for developer labs and educational platforms.
 
 ### Ultra cheat sheet (pocket card)
@@ -497,8 +511,9 @@ IBM DSN (Markham, ON) builds developer education: labs, tutorials, APIs, reprodu
 | Topic | One-liner |
 |---|---|
 | Leakage | `shift(1).rolling(...)` = look only at past games |
-| Inference | `build_inference_features.py` builds tonight’s clue sheets for the API |
-| Biggest gap | Train/serve skew — copy-last-row vs full recompute |
+| Inference | Recomputes rolling/travel/fatigue/odds for upcoming matchups |
+| Eval unit | Train on team-rows; score holdout at game-level |
+| Hard remaining risk | Pregame odds snapshot / point-in-time market features |
 | Champion rule | Best probabilistic score (log loss + Brier), not flashy architecture |
 | LSTM | Experiment only; not served / not promoted |
 | Kitchen / Menu | FastAPI cooks; Streamlit waits tables |
@@ -510,15 +525,22 @@ IBM DSN (Markham, ON) builds developer education: labs, tutorials, APIs, reprodu
 ### Files to be able to screen-share
 
 1. `scripts/build_features.py` — the no-cheating factory
-2. `scripts/build_inference_features.py` — tonight’s inputs (+ admit the skew)
-3. `scripts/model_promotion.py` — the tournament judge
-4. `api/main.py` — `/predict/team` + normalization + startup checks
-5. `docker-compose.yml` — four containers, including unused Postgres (own it)
+2. `scripts/build_inference_features.py` — upcoming feature materialization (recomputed fields)
+3. `scripts/model_utils.py` — `select_game_level_rows` / promotion metrics helpers
+4. `scripts/model_promotion.py` — the tournament judge
+5. `api/main.py` — `/predict/team` + normalization + startup checks
+6. `docker-compose.yml` — four containers, including unused Postgres (own it)
 
 ### Practice question drill
 
 **Q: How do you prevent leakage?**  
-A: Prior-game-only rolling features via `shift(1)`, backward injury as-of merges, and a leakage column guard. Odds still need a stricter pregame freeze.
+A: Prior-game-only rolling features via `shift(1)`, backward injury as-of merges, and a leakage column guard. Odds still need a stricter pregame freeze for point-in-time correctness.
+
+**Q: How do you avoid train/serve skew?**  
+A: Inference rebuilds matchup features for upcoming games — rolling form from completed games, venue travel, fatigue, injuries, and odds when available — instead of shipping an untouched historical row.
+
+**Q: Why two rows per game if you evaluate once?**  
+A: Team-centric features want both perspectives for training/serving each side; game-level metrics avoid treating paired anti-correlated labels as independent samples.
 
 **Q: Did the LSTM win?**  
 A: It wasn’t in the production tournament path. Champion promotion is among baseline / tree / AutoML challenger using probability metrics.
@@ -531,4 +553,4 @@ A: Separation of concerns — reusable inference service + rapid educational das
 
 ---
 
-_Last tip: In the interview, lead with software design decisions (modularity, failure modes, promotion gates, train/serve parity). Use NBA stats only as seasoning, not the main course._
+_Last tip: In the interview, lead with software design decisions (modularity, failure modes, promotion gates, offline/online features, game-level evaluation). Use NBA stats only as seasoning, not the main course._
