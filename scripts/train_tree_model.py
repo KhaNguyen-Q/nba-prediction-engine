@@ -11,9 +11,10 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from scripts.model_utils import (
-    classification_metrics,
+    classification_metrics_game_level,
     leakage_safe_team_features,
     rolling_time_splits,
+    select_game_level_rows,
     time_aware_train_test_split,
     write_calibration_report,
     write_registry_entry,
@@ -39,7 +40,7 @@ BASELINE_FEATURES = [
     'pts_last5', 'reb_last5', 'ast_last5',
     'pts_last10', 'reb_last10', 'ast_last10',
     'REST_DAYS', 'BACK_TO_BACK', 'TRAVEL_DISTANCE', 'TIMEZONE_SHIFT',
-    'fatigue_index', 'ADULT_ENTERTAINMENT_INDEX'
+    'fatigue_index',
 ]
 
 
@@ -89,14 +90,22 @@ def train_tree_model():
 
     y_pred = model.predict(X_test)
     y_score = model.predict_proba(X_test)[:, 1]
-    holdout_metrics = classification_metrics(y_test, y_pred, y_score)
+    holdout_metrics = classification_metrics_game_level(test_df, y_pred, y_score)
+    eval_test = select_game_level_rows(test_df.assign(_y_score=y_score))
 
-    print('XGBoost model metrics')
+    print('XGBoost model metrics (game-level holdout)')
     print('Accuracy:', holdout_metrics.get('accuracy'))
     print('ROC-AUC:', holdout_metrics.get('roc_auc'))
     print('Log loss:', holdout_metrics.get('log_loss'))
     print('Brier score:', holdout_metrics.get('brier_score'))
-    calibration_report = write_calibration_report("tree", y_test, y_score, out_dir="reports", n_bins=10)
+    print(f"Eval unit: {holdout_metrics.get('eval_unit')} ({holdout_metrics.get('eval_rows')} rows)")
+    calibration_report = write_calibration_report(
+        "tree",
+        eval_test['WIN'],
+        eval_test['_y_score'],
+        out_dir="reports",
+        n_bins=10,
+    )
     print(f"Calibration report: {calibration_report['path']} (ECE={calibration_report['ece']:.4f})")
 
     rolling_results = []
@@ -107,15 +116,16 @@ def train_tree_model():
         for train_idx, test_idx, fold_label in folds:
             X_fold_train = X_all.loc[train_idx]
             y_fold_train = y_all.loc[train_idx]
-            X_fold_test = X_all.loc[test_idx]
-            y_fold_test = y_all.loc[test_idx]
-            if y_fold_train.nunique() < 2 or y_fold_test.nunique() < 2:
+            fold_test_df = df.loc[test_idx]
+            if y_fold_train.nunique() < 2:
                 continue
             fold_model = XGBClassifier(eval_metric='logloss', random_state=42)
             fold_model.fit(X_fold_train, y_fold_train)
-            y_fold_pred = fold_model.predict(X_fold_test)
-            y_fold_score = fold_model.predict_proba(X_fold_test)[:, 1]
-            fold_metrics = classification_metrics(y_fold_test, y_fold_pred, y_fold_score)
+            y_fold_pred = fold_model.predict(fold_test_df[feature_columns].fillna(0.0))
+            y_fold_score = fold_model.predict_proba(fold_test_df[feature_columns].fillna(0.0))[:, 1]
+            fold_metrics = classification_metrics_game_level(fold_test_df, y_fold_pred, y_fold_score)
+            if select_game_level_rows(fold_test_df)['WIN'].nunique() < 2:
+                continue
             fold_metrics['fold'] = fold_label
             rolling_results.append(fold_metrics)
     if rolling_results:
@@ -130,11 +140,10 @@ def train_tree_model():
             baseline_model = joblib.load(LOGISTIC_MODEL_PATH)
             if set(BASELINE_FEATURES).issubset(set(df.columns)):
                 X_test_base = test_df[BASELINE_FEATURES].fillna(0)
-                y_test_base = test_df['WIN'].astype(int)
                 y_pred_base = baseline_model.predict(X_test_base)
                 y_score_base = baseline_model.predict_proba(X_test_base)[:, 1]
-                baseline_metrics = classification_metrics(y_test_base, y_pred_base, y_score_base)
-                print('Logistic baseline metrics on same holdout split')
+                baseline_metrics = classification_metrics_game_level(test_df, y_pred_base, y_score_base)
+                print('Logistic baseline metrics on same holdout split (game-level)')
                 print('Logistic Accuracy:', baseline_metrics.get('accuracy'))
                 print('Logistic ROC-AUC:', baseline_metrics.get('roc_auc'))
                 print('Logistic Log loss:', baseline_metrics.get('log_loss'))
@@ -164,10 +173,12 @@ def train_tree_model():
                 "path": calibration_report["path"],
             },
         },
-        split_description=split_desc,
+        split_description=f"{split_desc}; metrics evaluated at game-level",
         extra={
             "train_rows": int(len(X_train)),
             "test_rows": int(len(X_test)),
+            "test_games": int(holdout_metrics.get("eval_rows", len(X_test))),
+            "eval_unit": holdout_metrics.get("eval_unit", "row"),
         },
     )
     print(f'Wrote registry entry to {registry_path}')

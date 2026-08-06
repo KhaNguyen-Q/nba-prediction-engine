@@ -26,7 +26,6 @@ CORE_FEATURES = [
     "TIMEZONE_SHIFT",
     "fatigue_index",
     "INJURY_IMPACT",
-    "ADULT_ENTERTAINMENT_INDEX",
 ]
 
 

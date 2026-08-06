@@ -1,6 +1,7 @@
 import os
 import sys
 import pandas as pd
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -12,8 +13,9 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from scripts.model_utils import (
-    classification_metrics,
+    classification_metrics_game_level,
     rolling_time_splits,
+    select_game_level_rows,
     time_aware_train_test_split,
     write_calibration_report,
     write_registry_entry,
@@ -25,27 +27,22 @@ REQUIRED_FEATURES = [
     'pts_last5', 'reb_last5', 'ast_last5',
     'pts_last10', 'reb_last10', 'ast_last10',
     'REST_DAYS', 'BACK_TO_BACK', 'TRAVEL_DISTANCE', 'TIMEZONE_SHIFT',
-    'fatigue_index', 'ADULT_ENTERTAINMENT_INDEX'
+    'fatigue_index',
 ]
 
 
-def _time_aware_split(df, feature_columns, test_size=0.2):
+def _time_split_dataframe(df, test_size=0.2):
     train_df, test_df, split_desc = time_aware_train_test_split(df, date_col='GAME_DATE', test_size=test_size)
     if not train_df.empty and not test_df.empty:
-        return (
-            train_df[feature_columns],
-            test_df[feature_columns],
-            train_df['WIN'].astype(int),
-            test_df['WIN'].astype(int),
-            split_desc
-        )
+        return train_df, test_df, split_desc
 
-    X = df[feature_columns]
-    y = df['WIN'].astype(int)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
+    train_idx, test_idx = train_test_split(
+        np.arange(len(df)),
+        test_size=test_size,
+        random_state=42,
+        stratify=df['WIN'].astype(int),
     )
-    return X_train, X_test, y_train, y_test, "stratified random split (fallback)"
+    return df.iloc[train_idx], df.iloc[test_idx], "stratified random split (fallback)"
 
 
 def train_baseline():
@@ -69,8 +66,13 @@ def train_baseline():
     if df['WIN'].nunique() < 2:
         raise ValueError("WIN label must contain both classes for training.")
 
-    X_train, X_test, y_train, y_test, split_desc = _time_aware_split(df, features, test_size=0.2)
+    train_df, test_df, split_desc = _time_split_dataframe(df, test_size=0.2)
     print(f"Using {split_desc}.")
+
+    X_train = train_df[features]
+    y_train = train_df['WIN'].astype(int)
+    X_test = test_df[features]
+    y_test = test_df['WIN'].astype(int)
 
     model = Pipeline([
         ('scaler', StandardScaler()),
@@ -80,14 +82,22 @@ def train_baseline():
 
     y_pred = model.predict(X_test)
     y_score = model.predict_proba(X_test)[:, 1]
-    holdout_metrics = classification_metrics(y_test, y_pred, y_score)
+    holdout_metrics = classification_metrics_game_level(test_df, y_pred, y_score)
+    eval_test = select_game_level_rows(test_df.assign(_y_score=y_score))
 
-    print("Baseline metrics")
+    print("Baseline metrics (game-level holdout)")
     print("Accuracy:", holdout_metrics.get("accuracy"))
     print("ROC-AUC:", holdout_metrics.get("roc_auc"))
     print("Log loss:", holdout_metrics.get("log_loss"))
     print("Brier score:", holdout_metrics.get("brier_score"))
-    calibration_report = write_calibration_report("baseline", y_test, y_score, out_dir="reports", n_bins=10)
+    print(f"Eval unit: {holdout_metrics.get('eval_unit')} ({holdout_metrics.get('eval_rows')} rows)")
+    calibration_report = write_calibration_report(
+        "baseline",
+        eval_test['WIN'],
+        eval_test['_y_score'],
+        out_dir="reports",
+        n_bins=10,
+    )
     print(f"Calibration report: {calibration_report['path']} (ECE={calibration_report['ece']:.4f})")
 
     rolling_results = []
@@ -98,18 +108,19 @@ def train_baseline():
         for train_idx, test_idx, fold_label in folds:
             X_fold_train = X_all.loc[train_idx]
             y_fold_train = y_all.loc[train_idx]
-            X_fold_test = X_all.loc[test_idx]
-            y_fold_test = y_all.loc[test_idx]
-            if y_fold_train.nunique() < 2 or y_fold_test.nunique() < 2:
+            fold_test_df = df.loc[test_idx]
+            if y_fold_train.nunique() < 2:
                 continue
             fold_model = Pipeline([
                 ('scaler', StandardScaler()),
                 ('logreg', LogisticRegression(max_iter=5000, solver='lbfgs', random_state=42)),
             ])
             fold_model.fit(X_fold_train, y_fold_train)
-            y_fold_pred = fold_model.predict(X_fold_test)
-            y_fold_score = fold_model.predict_proba(X_fold_test)[:, 1]
-            fold_metrics = classification_metrics(y_fold_test, y_fold_pred, y_fold_score)
+            y_fold_pred = fold_model.predict(fold_test_df[features].fillna(0.0))
+            y_fold_score = fold_model.predict_proba(fold_test_df[features].fillna(0.0))[:, 1]
+            fold_metrics = classification_metrics_game_level(fold_test_df, y_fold_pred, y_fold_score)
+            if select_game_level_rows(fold_test_df)['WIN'].nunique() < 2:
+                continue
             fold_metrics['fold'] = fold_label
             rolling_results.append(fold_metrics)
     if rolling_results:
@@ -138,10 +149,12 @@ def train_baseline():
                 "path": calibration_report["path"],
             },
         },
-        split_description=split_desc,
+        split_description=f"{split_desc}; metrics evaluated at game-level",
         extra={
             "train_rows": int(len(X_train)),
             "test_rows": int(len(X_test)),
+            "test_games": int(holdout_metrics.get("eval_rows", len(X_test))),
+            "eval_unit": holdout_metrics.get("eval_unit", "row"),
         },
     )
     print(f"Wrote registry entry to {registry_path}")

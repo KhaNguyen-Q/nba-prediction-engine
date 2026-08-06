@@ -60,13 +60,6 @@ def find_team_profile(team_id=None, abbreviation=None, team_name=None, config_pa
     return None
 
 
-def get_team_adult_quality(team_id=None, abbreviation=None, config_path=CONFIG_PATH, default=5):
-    team = find_team_profile(team_id=team_id, abbreviation=abbreviation, config_path=config_path)
-    if not team:
-        return default
-    return team.get('adult_quality_rating', default)
-
-
 def load_team_locations(config_path=LOCATIONS_CONFIG_PATH):
     try:
         with open(config_path, 'r', encoding='utf-8') as f:

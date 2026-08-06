@@ -17,13 +17,12 @@ BACKTEST_SUMMARY_PATH = ROOT_DIR / 'reports' / 'backtest_summary.csv'
 MODEL_PATHS = {
     'baseline': ROOT_DIR / 'models' / 'logistic_baseline.pkl',
     'tree': ROOT_DIR / 'models' / 'xgb_tree_model.pkl',
-    'ensemble': ROOT_DIR / 'models' / 'ensemble_meta.pkl',
 }
 BASELINE_FEATURES = [
     'pts_last5', 'reb_last5', 'ast_last5',
     'pts_last10', 'reb_last10', 'ast_last10',
     'REST_DAYS', 'BACK_TO_BACK', 'TRAVEL_DISTANCE', 'TIMEZONE_SHIFT',
-    'fatigue_index', 'ADULT_ENTERTAINMENT_INDEX',
+    'fatigue_index',
 ]
 
 
@@ -99,9 +98,6 @@ def prepare_model_inputs(model, df, model_name):
         features = df.select_dtypes(include=[np.number]).drop(columns=['WIN'], errors='ignore')
         return features.fillna(0)
 
-    if model_name == 'ensemble':
-        raise ValueError('Ensemble model inputs should be built from baseline/tree outputs.')
-
     raise ValueError(f'Unknown model {model_name}')
 
 
@@ -109,14 +105,6 @@ def model_predict_proba(model_name, df):
     model = load_model(model_name)
     if model is None:
         return None
-
-    if model_name == 'ensemble':
-        baseline_probs = model_predict_proba('baseline', df)
-        tree_probs = model_predict_proba('tree', df)
-        if baseline_probs is None or tree_probs is None:
-            return None
-        ensemble_input = pd.DataFrame({'baseline_prob': baseline_probs, 'tree_prob': tree_probs})
-        return model.predict_proba(ensemble_input)[:, 1]
 
     X = prepare_model_inputs(model, df, model_name)
     if not hasattr(model, 'predict_proba'):

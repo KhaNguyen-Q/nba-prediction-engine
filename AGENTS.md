@@ -7,7 +7,7 @@ This repo is an NBA prediction engine with two runnable services plus a batch pi
 - Streamlit dashboard: `streamlit_app.py` (default port 8501), which is the primary dev app (see `.devcontainer/devcontainer.json`).
 - Pipeline/training scripts in `scripts/` (see `CONTRIBUTING.md` for the documented flows).
 
-Python dependencies are installed into a virtualenv at `.venv/` (gitignored) by the Cloud Agent update script. Run tools via `.venv/bin/...` (e.g. `.venv/bin/uvicorn`, `.venv/bin/streamlit`). `requirements.txt` pulls in `torch`, `xgboost`, and `lightgbm`, so the first install is large.
+Python dependencies are installed into a virtualenv at `.venv/` (gitignored) by the Cloud Agent update script. Run tools via `.venv/bin/...` (e.g. `.venv/bin/uvicorn`, `.venv/bin/streamlit`). `requirements.txt` pulls in `xgboost` and related serving deps; the first install can take a bit.
 
 Non-obvious gotchas:
 - The FastAPI app runs startup checks that **raise and abort startup** when model/data artifacts are missing, unless you set `STRICT_STARTUP_CHECKS=0`. In a fresh dev environment (no generated data/models) you must start it as:
