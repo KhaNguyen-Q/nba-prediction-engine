@@ -11,8 +11,6 @@ This repository is a modern NBA prediction engine focused on:
 - baseline logistic regression, XGBoost, AutoML challenger, and player projection
 - FastAPI serving + Streamlit dashboard + Docker Compose orchestration
 
-See `PROJECT_STUDY_GUIDE.md` for architecture walkthroughs and the audit of removed experiments vs real improvement topics.
-
 ## 2. Working with the repository
 
 ### Recommended workflow
@@ -46,7 +44,6 @@ Whenever any of the following change, update documentation immediately:
 Primary docs to update:
 - `README.md`
 - `CONTRIBUTING.md`
-- `PROJECT_STUDY_GUIDE.md` (if architecture / interview framing changes)
 - file-level docstrings and comments
 
 ## 4. Project layout summary
@@ -147,7 +144,7 @@ When adding a new feature or data source:
 
 - `config/nba_teams.json` is the project’s canonical NBA team source.
 - `scripts/team_utils.py` is the shared team validation API.
-- Keep `README.md`, `CONTRIBUTING.md`, and `PROJECT_STUDY_GUIDE.md` synchronized.
+- Keep `README.md` and `CONTRIBUTING.md` synchronized.
 - Postgres in Compose is provisioned for future persistence; current serving is file-artifact based.
 - Production path today: baseline / tree / AutoML challenger / player projection → FastAPI → Streamlit.
 

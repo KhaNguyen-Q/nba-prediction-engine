@@ -162,13 +162,12 @@ nba-prediction-engine/
 ├─ docker-compose.yml  # api + scheduler + streamlit + postgres
 ├─ Dockerfile
 ├─ requirements.txt
-├─ PROJECT_STUDY_GUIDE.md  # Plain-English interview / architecture guide
 ├─ data/               # (generated) raw & processed datasets — gitignored
 ├─ models/             # (generated) trained artifacts & registry — gitignored
 └─ reports/            # (generated) monitoring & quality reports — gitignored
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the documented step-by-step pipeline flows. See [`PROJECT_STUDY_GUIDE.md`](PROJECT_STUDY_GUIDE.md) for interview prep and the **Removed vs Improvement Topics** audit.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the documented step-by-step pipeline flows.
 
 ---
 

@@ -20,3 +20,6 @@ reports/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# Private local interview notes (do not publish)
+PROJECT_STUDY_GUIDE.md
