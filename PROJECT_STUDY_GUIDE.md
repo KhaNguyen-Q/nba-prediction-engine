@@ -343,6 +343,18 @@ Winner files:
 **Interview line:**
 > “Promotion is metric-driven and prioritizes calibrated probabilistic quality — log loss and Brier — with a minimum improvement gate so we don’t thrash champions on noise.”
 
+### Example metrics (offline simulation run)
+
+When live NBA ingest is unavailable, `scripts/simulate_offline_dataset.py` + the real train scripts can still produce registry metrics. One documented run (game-level holdout) filled the README table:
+
+| Model | Accuracy | Log Loss | Brier | ROC-AUC |
+|---|---:|---:|---:|---:|
+| Baseline | 0.566 | 0.687 | 0.247 | 0.590 |
+| Tree (XGBoost) | 0.559 | 1.032 | 0.316 | 0.586 |
+| Champion (AutoML logreg_l2) | 0.604 | 0.669 | 0.238 | 0.613 |
+
+Talking point: untuned XGBoost can lose on log loss/Brier even if accuracy looks similar — promotion correctly preferred the better-calibrated challenger.
+
 ### Monitoring after the tournament
 
 | Report | Script | What it checks |
